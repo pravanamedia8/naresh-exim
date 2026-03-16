@@ -367,6 +367,7 @@ const TAB_GROUPS = [
     { id:'pipeline', icon:'🚀', label:'Pipeline' },
     { id:'codes', icon:'📋', label:'All Codes' },
     { id:'detail', icon:'🔍', label:'Code Detail' },
+    { id:'volza', icon:'🚢', label:'Volza Data' },
   ]},
   { group:'Analysis', tabs:[
     { id:'trial', icon:'🧪', label:'Trial Run 8504' },
@@ -568,8 +569,11 @@ function LiveFeed({ activity }) {
   )
 }
 
-// ─── PIPELINE TAB ───────────────────────────────────────────
-function PipelineTab({ codes }) {
+// ─── PIPELINE TAB (Enhanced with per-product research findings) ───
+function PipelineTab({ codes, p2Data, regData, p3Data, p4Data, scoringData, onSelect }) {
+  const [sub, setSub] = useState('funnel')
+  const [expandedCode, setExpandedCode] = useState(null)
+
   const stages = [
     { label:'Total Codes', count: codes.length, color: C.blue },
     { label:'P2 Alibaba Done', count: codes.filter(c=>c.phase2_status==='DONE').length, color: C.cyan },
@@ -582,50 +586,385 @@ function PipelineTab({ codes }) {
   ]
   const maxC = Math.max(...stages.map(s=>s.count), 1)
 
+  // Group codes by their current pipeline stage
+  const stageGroups = useMemo(() => {
+    const groups = { 'P2 — Alibaba':[], 'P2b — Regulatory':[], 'P3 — IndiaMART':[], 'QA Gate':[], 'P4 — Volza':[], 'P5 — Scoring':[], 'Complete':[], 'Killed':[], 'Pending':[] }
+    codes.forEach(c => {
+      if (c.kill_phase) groups['Killed'].push(c)
+      else if (c.current_phase === 'COMPLETE') groups['Complete'].push(c)
+      else if (c.phase5_status === 'DONE') groups['Complete'].push(c)
+      else if (c.phase4_status === 'DONE' || c.phase4_status === 'running') groups['P5 — Scoring'].push(c)
+      else if (c.qa_status === 'PASSED') groups['P4 — Volza'].push(c)
+      else if (c.phase3_status === 'DONE' || c.phase3_status === 'running') groups['QA Gate'].push(c)
+      else if (c.phase2b_status === 'DONE' || c.phase2b_status === 'running') groups['P3 — IndiaMART'].push(c)
+      else if (c.phase2_status === 'DONE' || c.phase2_status === 'running') groups['P2b — Regulatory'].push(c)
+      else if (c.phase2_status === 'running') groups['P2 — Alibaba'].push(c)
+      else groups['Pending'].push(c)
+    })
+    return groups
+  }, [codes])
+
+  // Build lookup maps for research findings
+  const p2Map = useMemo(() => Object.fromEntries((p2Data||[]).map(d=>[d.hs4,d])), [p2Data])
+  const regMap = useMemo(() => Object.fromEntries((regData||[]).map(d=>[d.hs4,d])), [regData])
+  const p3Map = useMemo(() => Object.fromEntries((p3Data||[]).map(d=>[d.hs4,d])), [p3Data])
+  const p4Map = useMemo(() => Object.fromEntries((p4Data||[]).map(d=>[d.hs4,d])), [p4Data])
+  const scoreMap = useMemo(() => Object.fromEntries((scoringData||[]).map(d=>[d.hs4,d])), [scoringData])
+
+  const subTabs = [
+    { id:'funnel', icon:'📊', label:'Funnel' },
+    { id:'stages', icon:'🔄', label:'By Stage' },
+    { id:'detail', icon:'📋', label:'Product Cards' },
+  ]
+
+  const stageColors = { 'P2 — Alibaba':C.cyan, 'P2b — Regulatory':C.purple, 'P3 — IndiaMART':C.yellow, 'QA Gate':C.orange, 'P4 — Volza':C.blue, 'P5 — Scoring':C.cyan, 'Complete':C.green, 'Killed':C.red, 'Pending':C.tx2 }
+
+  // Expanded product research card
+  const ProductCard = ({ c }) => {
+    const p2 = p2Map[c.hs4]; const reg = regMap[c.hs4]; const p3 = p3Map[c.hs4]; const p4 = p4Map[c.hs4]; const sc = scoreMap[c.hs4]
+    const isOpen = expandedCode === c.hs4
+    return (
+      <div style={{ background:C.bg, borderRadius:8, border:`1px solid ${C.border}`, marginBottom:8 }}>
+        <div onClick={() => setExpandedCode(isOpen ? null : c.hs4)} style={{ padding:'10px 14px', cursor:'pointer', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+          <div style={{ display:'flex', gap:12, alignItems:'center' }}>
+            <span style={{ fontWeight:700, color:C.blue, fontSize:14 }}>{c.hs4}</span>
+            <span style={{ fontSize:12, color:C.tx2, maxWidth:200, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{c.commodity}</span>
+            <span style={{ fontSize:11, color:C.tx2 }}>${(c.val_m||0).toLocaleString()}M</span>
+          </div>
+          <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+            <Badge text={c.current_phase === 'COMPLETE' ? 'COMPLETE' : c.kill_phase ? 'KILLED' : c.current_phase || 'pending'} />
+            {c.final_verdict && <Badge text={c.final_verdict} />}
+            {c.qa_status && <Badge text={`QA:${c.qa_status}`} />}
+            <span style={{ fontSize:14, color:C.tx2, marginLeft:4 }}>{isOpen ? '▼' : '▶'}</span>
+          </div>
+        </div>
+        {isOpen && (
+          <div style={{ padding:'0 14px 14px', borderTop:`1px solid ${C.border}`, marginTop:0 }}>
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(5,1fr)', gap:8, marginTop:10, fontSize:11 }}>
+              <div style={{ textAlign:'center' }}><Badge text={c.phase2_status || 'pending'} /><div style={{color:C.tx2,marginTop:2}}>P2 Supply</div></div>
+              <div style={{ textAlign:'center' }}><Badge text={c.phase2b_status || 'pending'} /><div style={{color:C.tx2,marginTop:2}}>P2b Reg</div></div>
+              <div style={{ textAlign:'center' }}><Badge text={c.phase3_status || 'pending'} /><div style={{color:C.tx2,marginTop:2}}>P3 Demand</div></div>
+              <div style={{ textAlign:'center' }}><Badge text={c.phase4_status || 'pending'} /><div style={{color:C.tx2,marginTop:2}}>P4 Volza</div></div>
+              <div style={{ textAlign:'center' }}><Badge text={c.phase5_status || 'pending'} /><div style={{color:C.tx2,marginTop:2}}>P5 Score</div></div>
+            </div>
+            {/* Research Findings */}
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:10, marginTop:14 }}>
+              {p2 && <div style={{ background:C.bg2, borderRadius:6, padding:10, border:`1px solid ${C.cyan}20` }}>
+                <div style={{ fontSize:11, fontWeight:600, color:C.cyan, marginBottom:6 }}>🏭 Supply Data</div>
+                <div style={{ fontSize:12, color:C.tx2, lineHeight:1.7 }}>
+                  Suppliers: <span style={{color:C.tx1,fontWeight:500}}>{p2.total_suppliers || '—'}</span><br/>
+                  FOB: <span style={{color:C.tx1}}>{p2.fob_lowest_usd ? `$${p2.fob_lowest_usd} - $${p2.fob_highest_usd}` : '—'}</span><br/>
+                  Gold%: <span style={{color:C.tx1}}>{p2.gold_supplier_pct != null ? `${p2.gold_supplier_pct}%` : '—'}</span><br/>
+                  MOQ: <span style={{color:C.tx1}}>{p2.typical_moq || '—'}</span>
+                </div>
+              </div>}
+              {reg && <div style={{ background:C.bg2, borderRadius:6, padding:10, border:`1px solid ${C.purple}20` }}>
+                <div style={{ fontSize:11, fontWeight:600, color:C.purple, marginBottom:6 }}>📋 Regulatory</div>
+                <div style={{ fontSize:12, color:C.tx2, lineHeight:1.7 }}>
+                  BCD: <span style={{color:C.tx1}}>{reg.bcd_rate != null ? `${reg.bcd_rate}%` : '—'}</span><br/>
+                  Total Duty: <span style={{color:C.tx1}}>{reg.total_duty_pct != null ? `${reg.total_duty_pct}%` : '—'}</span><br/>
+                  ADD: <span style={{color:reg.anti_dumping_status==='NONE'?C.green:C.red}}>{reg.anti_dumping_status || '—'}</span><br/>
+                  Risk: <span style={{color:C.tx1}}>{reg.risk_level || '—'}</span>
+                </div>
+              </div>}
+              {p3 && <div style={{ background:C.bg2, borderRadius:6, padding:10, border:`1px solid ${C.yellow}20` }}>
+                <div style={{ fontSize:11, fontWeight:600, color:C.yellow, marginBottom:6 }}>🇮🇳 Demand Data</div>
+                <div style={{ fontSize:12, color:C.tx2, lineHeight:1.7 }}>
+                  Sellers: <span style={{color:C.tx1}}>{p3.total_sellers || '—'}</span><br/>
+                  Price: <span style={{color:C.tx1}}>{p3.price_low_inr ? `₹${p3.price_low_inr.toLocaleString()} - ₹${(p3.price_high_inr||0).toLocaleString()}` : '—'}</span><br/>
+                  Margin: <span style={{color:p3.gross_margin_pct>20?C.green:p3.gross_margin_pct>10?C.yellow:C.red,fontWeight:600}}>{p3.gross_margin_pct != null ? `${p3.gross_margin_pct}%` : '—'}</span><br/>
+                  Mfr/Trader: <span style={{color:C.tx1}}>{p3.manufacturer_pct != null ? `${p3.manufacturer_pct}/${p3.trader_pct}%` : '—'}</span>
+                </div>
+              </div>}
+            </div>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginTop:8 }}>
+              {p4 && <div style={{ background:C.bg2, borderRadius:6, padding:10, border:`1px solid ${C.blue}20` }}>
+                <div style={{ fontSize:11, fontWeight:600, color:C.blue, marginBottom:6 }}>🚢 Volza Validation</div>
+                <div style={{ fontSize:12, color:C.tx2, lineHeight:1.7 }}>
+                  Buyers: <span style={{color:C.tx1}}>{p4.unique_buyers || '—'}</span> · HHI: <span style={{color:C.tx1}}>{p4.buyer_hhi || '—'}</span><br/>
+                  China: <span style={{color:C.tx1}}>{p4.china_sourcing_pct != null ? `${p4.china_sourcing_pct}%` : '—'}</span> · CIF: <span style={{color:C.tx1}}>{p4.median_cif_usd ? `$${p4.median_cif_usd}` : '—'}</span>
+                </div>
+              </div>}
+              {sc && <div style={{ background:C.bg2, borderRadius:6, padding:10, border:`1px solid ${C.green}20` }}>
+                <div style={{ fontSize:11, fontWeight:600, color:C.green, marginBottom:6 }}>⚡ Final Score</div>
+                <div style={{ fontSize:12, color:C.tx2, lineHeight:1.7 }}>
+                  Score: <span style={{color:sc.total_score>=90?C.green:C.yellow,fontWeight:700,fontSize:16}}>{sc.total_score}/150</span><br/>
+                  Verdict: <Badge text={sc.final_verdict} /> <span style={{fontSize:11,color:C.tx2,marginLeft:4}}>{sc.go_nogo_notes ? sc.go_nogo_notes.slice(0,80) : ''}</span>
+                </div>
+              </div>}
+            </div>
+            {c.kill_reason && <div style={{ background:C.redBg, borderRadius:6, padding:8, marginTop:8, fontSize:12, color:C.red }}>
+              💀 Killed at {c.kill_phase}: {c.kill_reason}
+            </div>}
+            {c.qa_warnings && <div style={{ background:C.yellowBg, borderRadius:6, padding:8, marginTop:8, fontSize:12, color:C.yellow }}>
+              ⚠️ QA Warnings: {c.qa_warnings}
+            </div>}
+            <div style={{ marginTop:8, textAlign:'right' }}>
+              <button onClick={() => onSelect?.(c.hs4)} style={{ padding:'4px 12px', background:C.blueBg, color:C.blue, border:`1px solid ${C.blue}30`, borderRadius:4, cursor:'pointer', fontSize:11 }}>
+                View Full Detail →
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    )
+  }
+
   return (
     <div className="fade-in">
-      <Card title="🚀 Research Pipeline Funnel">
-        <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
-          {stages.map((s, i) => (
-            <div key={i} style={{ display:'flex', alignItems:'center', gap:12 }}>
-              <div style={{ width:150, fontSize:12, color:C.tx2, textAlign:'right' }}>{s.label}</div>
-              <div style={{ flex:1, height:30, background:C.bg, borderRadius:6, overflow:'hidden', position:'relative' }}>
-                <div style={{ width:`${(s.count/maxC)*100}%`, height:'100%', background:`linear-gradient(90deg, ${s.color}40, ${s.color}80)`,
-                  borderRadius:6, transition:'width 0.5s ease', minWidth: s.count > 0 ? 40 : 0 }} />
-                <span style={{ position:'absolute', left:10, top:6, fontSize:13, fontWeight:600, color:C.tx1 }}>{s.count}</span>
-              </div>
-            </div>
-          ))}
-        </div>
-      </Card>
+      <SubTab tabs={subTabs} active={sub} onChange={setSub} />
 
-      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14, marginTop:14 }}>
-        <Card title="🏆 Completed">
-          {codes.filter(c=>c.current_phase==='COMPLETE').length === 0
-            ? <p style={{ color:C.tx2, fontSize:13 }}>No codes completed yet</p>
-            : <table>
-                <thead><tr><th>HS4</th><th>Product</th><th>Verdict</th><th>Score</th></tr></thead>
-                <tbody>{codes.filter(c=>c.current_phase==='COMPLETE').map(c => (
-                  <tr key={c.hs4}><td style={{fontWeight:600,color:C.blue}}>{c.hs4}</td>
-                    <td>{(c.commodity||'').slice(0,30)}</td><td><Badge text={c.final_verdict} /></td>
-                    <td>{c.drill_score}</td></tr>
-                ))}</tbody>
-              </table>
+      {sub === 'funnel' && <>
+        <Card title="🚀 Research Pipeline Funnel">
+          <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+            {stages.map((s, i) => (
+              <div key={i} style={{ display:'flex', alignItems:'center', gap:12 }}>
+                <div style={{ width:150, fontSize:12, color:C.tx2, textAlign:'right' }}>{s.label}</div>
+                <div style={{ flex:1, height:30, background:C.bg, borderRadius:6, overflow:'hidden', position:'relative' }}>
+                  <div style={{ width:`${(s.count/maxC)*100}%`, height:'100%', background:`linear-gradient(90deg, ${s.color}40, ${s.color}80)`,
+                    borderRadius:6, transition:'width 0.5s ease', minWidth: s.count > 0 ? 40 : 0 }} />
+                  <span style={{ position:'absolute', left:10, top:6, fontSize:13, fontWeight:600, color:C.tx1 }}>{s.count}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14, marginTop:14 }}>
+          <Card title="🏆 Completed">
+            {codes.filter(c=>c.current_phase==='COMPLETE').length === 0
+              ? <p style={{ color:C.tx2, fontSize:13 }}>No codes completed yet</p>
+              : <table>
+                  <thead><tr><th>HS4</th><th>Product</th><th>Verdict</th><th>Score</th></tr></thead>
+                  <tbody>{codes.filter(c=>c.current_phase==='COMPLETE').map(c => (
+                    <tr key={c.hs4} style={{cursor:'pointer'}} onClick={()=>onSelect?.(c.hs4)}><td style={{fontWeight:600,color:C.blue}}>{c.hs4}</td>
+                      <td>{(c.commodity||'').slice(0,30)}</td><td><Badge text={c.final_verdict} /></td>
+                      <td>{c.drill_score}</td></tr>
+                  ))}</tbody>
+                </table>
+            }
+          </Card>
+          <Card title="💀 Killed">
+            {codes.filter(c=>c.kill_phase).length === 0
+              ? <p style={{ color:C.tx2, fontSize:13 }}>No codes killed yet</p>
+              : <table>
+                  <thead><tr><th>HS4</th><th>Phase</th><th>Reason</th></tr></thead>
+                  <tbody>{codes.filter(c=>c.kill_phase).map(c => (
+                    <tr key={c.hs4}><td style={{fontWeight:600,color:C.red}}>{c.hs4}</td>
+                      <td>{c.kill_phase}</td><td style={{fontSize:12}}>{(c.kill_reason||'').slice(0,50)}</td></tr>
+                  ))}</tbody>
+                </table>
+            }
+          </Card>
+        </div>
+      </>}
+
+      {sub === 'stages' && <>
+        {Object.entries(stageGroups).filter(([,arr]) => arr.length > 0).map(([stage, items]) => (
+          <Card key={stage} title={`${stage} (${items.length})`} style={{ marginBottom:12 }}>
+            <SortableTable columns={[
+              { key:'hs4', label:'HS4', render: (v,r) => <span style={{fontWeight:700,color:C.blue,cursor:'pointer'}} onClick={()=>onSelect?.(v)}>{v}</span> },
+              { key:'commodity', label:'Product', style:{maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'} },
+              { key:'val_m', label:'Trade $M', render: v => v ? `$${v.toLocaleString()}` : '—' },
+              { key:'drill_score', label:'Score', render: v => <span style={{fontWeight:600}}>{v}</span> },
+              { key:'final_verdict', label:'Verdict', render: v => <Badge text={v} /> },
+              { key:'qa_status', label:'QA', render: v => <Badge text={v} /> },
+              { key:'kill_reason', label:'Kill Reason', style:{fontSize:11,color:C.tx2,maxWidth:200,overflow:'hidden',textOverflow:'ellipsis'} },
+            ]} data={items} pageSize={20} searchable={false} />
+          </Card>
+        ))}
+      </>}
+
+      {sub === 'detail' && <>
+        <div style={{ marginBottom:10, fontSize:12, color:C.tx2 }}>
+          Click any product to expand and see research findings from each phase. {codes.filter(c=>c.phase2_status==='DONE'||c.current_phase==='COMPLETE').length} products have research data.
+        </div>
+        {codes.filter(c => c.phase2_status==='DONE' || c.current_phase==='COMPLETE' || c.kill_phase).sort((a,b) => (b.drill_score||0)-(a.drill_score||0)).map(c => <ProductCard key={c.hs4} c={c} />)}
+        {codes.filter(c => !c.phase2_status || c.phase2_status === 'pending').length > 0 && (
+          <Card title={`⏳ Pending Research (${codes.filter(c => !c.phase2_status || c.phase2_status === 'pending').length} codes)`} style={{ marginTop:12 }}>
+            <div style={{ display:'flex', gap:4, flexWrap:'wrap' }}>
+              {codes.filter(c => !c.phase2_status || c.phase2_status === 'pending').slice(0,60).map(c => (
+                <span key={c.hs4} style={{ padding:'3px 8px', borderRadius:4, fontSize:11, background:C.bg, color:C.tx2, border:`1px solid ${C.border}`, cursor:'pointer' }}
+                  onClick={() => onSelect?.(c.hs4)}>{c.hs4}</span>
+              ))}
+              {codes.filter(c => !c.phase2_status || c.phase2_status === 'pending').length > 60 && <span style={{fontSize:11,color:C.tx2}}>+{codes.filter(c => !c.phase2_status || c.phase2_status === 'pending').length - 60} more</span>}
+            </div>
+          </Card>
+        )}
+      </>}
+    </div>
+  )
+}
+
+// ─── VOLZA DATA TAB ───────────────────────────────────────────
+function VolzaDataTab() {
+  const [sub, setSub] = useState('overview')
+  const shipmentsQ = useSupabase('volza_shipments', { order: 'date', limit: 500 })
+  const buyersQ = useSupabase('volza_buyers', { order: 'total_cif_usd', limit: 500 })
+
+  const shipments = shipmentsQ.data
+  const buyers = buyersQ.data
+
+  // Stats
+  const totalShipments = shipments.length
+  const totalBuyers = buyers.length
+  const totalCIF = shipments.reduce((s,r) => s + (parseFloat(r.cif_value_usd) || 0), 0)
+  const hs4Codes = [...new Set(shipments.map(s => s.hs4).filter(Boolean))]
+  const countries = [...new Set(shipments.map(s => s.country_origin).filter(Boolean))]
+  const avgCIF = totalShipments > 0 ? totalCIF / totalShipments : 0
+
+  // Charts: shipments by HS4
+  const byHS4 = useMemo(() => {
+    const m = {}
+    shipments.forEach(s => { if (s.hs4) m[s.hs4] = (m[s.hs4]||0) + 1 })
+    return Object.entries(m).sort((a,b) => b[1] - a[1]).slice(0, 15).map(([k,v]) => ({ name:k, count:v }))
+  }, [shipments])
+
+  // Charts: by country
+  const byCountry = useMemo(() => {
+    const m = {}
+    shipments.forEach(s => { if (s.country_origin) m[s.country_origin] = (m[s.country_origin]||0) + 1 })
+    return Object.entries(m).sort((a,b) => b[1] - a[1]).slice(0, 10).map(([k,v]) => ({ name:k, count:v }))
+  }, [shipments])
+
+  // Charts: by month
+  const byMonth = useMemo(() => {
+    const m = {}
+    shipments.forEach(s => { if (s.date) { const mo = String(s.date).slice(0,7); m[mo] = (m[mo]||0) + 1 } })
+    return Object.entries(m).sort().map(([k,v]) => ({ name:k, count:v }))
+  }, [shipments])
+
+  // Top buyers by CIF
+  const topBuyers = useMemo(() =>
+    [...buyers].sort((a,b) => (parseFloat(b.total_cif_usd)||0) - (parseFloat(a.total_cif_usd)||0)).slice(0, 10)
+      .map(b => ({ name:(b.company_name||'').slice(0,25), cif: Math.round(parseFloat(b.total_cif_usd)||0) }))
+  , [buyers])
+
+  const shipCols = [
+    { key:'date', label:'Date', render: v => v ? String(v).slice(0,10) : '—', style:{whiteSpace:'nowrap',fontSize:11} },
+    { key:'hs4', label:'HS4', filterable:true, render: v => <span style={{fontWeight:600,color:C.blue}}>{v}</span> },
+    { key:'hs_code', label:'HS Code', style:{fontSize:11} },
+    { key:'product_desc', label:'Product', style:{maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',fontSize:11} },
+    { key:'consignee_name', label:'Buyer', render: v => <span style={{fontWeight:500}}>{(v||'').slice(0,30)}</span> },
+    { key:'shipper_name', label:'Shipper', style:{fontSize:11}, render: v => (v||'').slice(0,25) },
+    { key:'cif_value_usd', label:'CIF ($)', render: v => v ? `$${parseFloat(v).toLocaleString(undefined,{maximumFractionDigits:0})}` : '—' },
+    { key:'unit_rate_usd', label:'Unit Rate', render: v => v ? `$${parseFloat(v).toFixed(2)}` : '—' },
+    { key:'std_qty', label:'Qty', render: v => v ? parseFloat(v).toLocaleString() : '—' },
+    { key:'country_origin', label:'Origin', filterable:true },
+    { key:'consignee_city', label:'City', filterable:true },
+    { key:'tax_pct', label:'Duty%', render: v => v ? `${parseFloat(v).toFixed(1)}%` : '—' },
+  ]
+
+  const buyerCols = [
+    { key:'company_name', label:'Company', render: v => <span style={{fontWeight:600}}>{v}</span> },
+    { key:'classification', label:'Type', filterable:true, render: v => <Badge text={v} /> },
+    { key:'shipment_count', label:'Shipments', render: v => <span style={{fontWeight:600}}>{v||0}</span> },
+    { key:'total_cif_usd', label:'Total CIF', render: v => v ? `$${parseFloat(v).toLocaleString(undefined,{maximumFractionDigits:0})}` : '—' },
+    { key:'hs_codes', label:'HS Codes', style:{fontSize:11,maxWidth:120,overflow:'hidden',textOverflow:'ellipsis'} },
+    { key:'city', label:'City', filterable:true },
+    { key:'state', label:'State', filterable:true },
+    { key:'china_pct', label:'China%', render: v => v ? <span style={{color:parseFloat(v)>50?C.red:C.tx1}}>{parseFloat(v).toFixed(0)}%</span> : '—' },
+    { key:'middleman_score', label:'Middleman', render: v => v ? parseFloat(v).toFixed(1) : '—' },
+    { key:'is_target', label:'Target', render: v => v ? <Badge text="TARGET" color={C.cyan} /> : '' },
+    { key:'iec', label:'IEC', style:{fontSize:10,color:C.tx2} },
+  ]
+
+  const subTabs = [
+    { id:'overview', icon:'📊', label:'Overview' },
+    { id:'shipments', icon:'🚢', label:'Shipments' },
+    { id:'buyers', icon:'🎯', label:'Buyers' },
+  ]
+
+  return (
+    <div className="fade-in">
+      <SubTab tabs={subTabs} active={sub} onChange={setSub} />
+
+      {sub === 'overview' && <>
+        <div style={{ display:'flex', gap:12, flexWrap:'wrap', marginBottom:16 }}>
+          <KPI icon="🚢" label="Total Shipments" value={totalShipments.toLocaleString()} color={C.blue} />
+          <KPI icon="👥" label="Total Buyers" value={totalBuyers.toLocaleString()} color={C.cyan} />
+          <KPI icon="💰" label="Total CIF" value={`$${(totalCIF/1e6).toFixed(1)}M`} color={C.green} />
+          <KPI icon="📊" label="Avg CIF" value={`$${avgCIF.toFixed(0)}`} color={C.yellow} />
+          <KPI icon="📦" label="HS4 Codes" value={hs4Codes.length} color={C.blue} />
+          <KPI icon="🌍" label="Countries" value={countries.length} color={C.purple} />
+        </div>
+
+        {totalShipments === 0 ? (
+          <Card title="🚀 Waiting for Volza Data">
+            <p style={{ color:C.tx2, fontSize:13, lineHeight:1.8 }}>
+              No shipment data yet. The KS4 v10 scraper will populate this tab as it scrapes Volza import data.
+              Once the scraping agent imports JSON batches, shipments and buyer data will appear here automatically.
+            </p>
+          </Card>
+        ) : <>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14 }}>
+            <Card title="📦 Shipments by HS4 Code">
+              <ResponsiveContainer width="100%" height={280}>
+                <BarChart data={byHS4} layout="vertical">
+                  <XAxis type="number" tick={{ fill:C.tx2, fontSize:10 }} />
+                  <YAxis type="category" dataKey="name" width={45} tick={{ fill:C.tx2, fontSize:10 }} />
+                  <Tooltip contentStyle={{ background:C.bg2, border:`1px solid ${C.border}`, borderRadius:8, color:C.tx1 }} />
+                  <Bar dataKey="count" fill={C.blue} radius={[0,4,4,0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </Card>
+
+            <Card title="🌍 Shipments by Origin">
+              <ResponsiveContainer width="100%" height={280}>
+                <PieChart>
+                  <Pie data={byCountry} cx="50%" cy="50%" outerRadius={90} dataKey="count"
+                    label={({name,count}) => count > 0 ? `${name}: ${count}` : ''} labelLine={false}>
+                    {byCountry.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+                  </Pie>
+                  <Tooltip contentStyle={{ background:C.bg2, border:`1px solid ${C.border}`, borderRadius:8, color:C.tx1 }} />
+                </PieChart>
+              </ResponsiveContainer>
+            </Card>
+          </div>
+
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14, marginTop:14 }}>
+            <Card title="📈 Shipments by Month">
+              <ResponsiveContainer width="100%" height={200}>
+                <BarChart data={byMonth}>
+                  <XAxis dataKey="name" tick={{ fill:C.tx2, fontSize:10 }} />
+                  <YAxis tick={{ fill:C.tx2, fontSize:10 }} />
+                  <Tooltip contentStyle={{ background:C.bg2, border:`1px solid ${C.border}`, borderRadius:8, color:C.tx1 }} />
+                  <Bar dataKey="count" fill={C.cyan} radius={[4,4,0,0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </Card>
+
+            <Card title="🎯 Top Buyers by CIF Value">
+              <ResponsiveContainer width="100%" height={200}>
+                <BarChart data={topBuyers} layout="vertical">
+                  <XAxis type="number" tick={{ fill:C.tx2, fontSize:10 }} tickFormatter={v => `$${(v/1000).toFixed(0)}K`} />
+                  <YAxis type="category" dataKey="name" width={110} tick={{ fill:C.tx2, fontSize:9 }} />
+                  <Tooltip contentStyle={{ background:C.bg2, border:`1px solid ${C.border}`, borderRadius:8, color:C.tx1 }} formatter={v => `$${v.toLocaleString()}`} />
+                  <Bar dataKey="cif" fill={C.green} radius={[0,4,4,0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </Card>
+          </div>
+        </>}
+      </>}
+
+      {sub === 'shipments' && <>
+        <Card title={`🚢 Volza Shipments (${totalShipments.toLocaleString()} records)`}>
+          {totalShipments === 0
+            ? <p style={{ color:C.tx2, fontSize:13 }}>No shipments yet. Data will appear as the scraper imports batches.</p>
+            : <SortableTable columns={shipCols} data={shipments} pageSize={30} />
           }
         </Card>
-        <Card title="💀 Killed">
-          {codes.filter(c=>c.kill_phase).length === 0
-            ? <p style={{ color:C.tx2, fontSize:13 }}>No codes killed yet</p>
-            : <table>
-                <thead><tr><th>HS4</th><th>Phase</th><th>Reason</th></tr></thead>
-                <tbody>{codes.filter(c=>c.kill_phase).map(c => (
-                  <tr key={c.hs4}><td style={{fontWeight:600,color:C.red}}>{c.hs4}</td>
-                    <td>{c.kill_phase}</td><td style={{fontSize:12}}>{(c.kill_reason||'').slice(0,50)}</td></tr>
-                ))}</tbody>
-              </table>
+      </>}
+
+      {sub === 'buyers' && <>
+        <Card title={`🎯 Volza Buyers (${totalBuyers.toLocaleString()} companies)`}>
+          {totalBuyers === 0
+            ? <p style={{ color:C.tx2, fontSize:13 }}>No buyer data yet. Buyers are aggregated from shipment records after import.</p>
+            : <SortableTable columns={buyerCols} data={buyers} pageSize={30} />
           }
         </Card>
-      </div>
+      </>}
     </div>
   )
 }
@@ -1033,6 +1372,7 @@ export default function App() {
   const agentsQ = useSupabase('agent_registry', { order: 'agent_id', asc: true })
   const activityQ = useSupabase('agent_activity', { order: 'created_at', limit: 500 })
   const p2SumQ = useSupabase('phase2_alibaba_summary')
+  const regQ = useSupabase('phase2b_regulatory')
   const p3SumQ = useSupabase('phase3_indiamart_summary')
   const p4Q = useSupabase('phase4_volza')
   const scoringQ = useSupabase('phase5_scoring')
@@ -1043,6 +1383,7 @@ export default function App() {
   const agents = agentsQ.data.length > 0 ? agentsQ.data : []
   const activity = activityQ.data
   const p2Data = p2SumQ.data.length > 0 ? p2SumQ.data : [TRIAL.phase2]
+  const regData = regQ.data
   const p3Data = p3SumQ.data.length > 0 ? p3SumQ.data : [TRIAL.phase3]
   const p4Data = p4Q.data.length > 0 ? p4Q.data : [TRIAL.phase4]
   const scoringData = scoringQ.data.length > 0 ? scoringQ.data : [TRIAL.phase5]
@@ -1102,9 +1443,10 @@ export default function App() {
             {tab === 'command' && <CommandCenter codes={codes} agents={agents} activity={activity} />}
             {tab === 'agents' && <AgentMonitor agents={agents} activity={activity} />}
             {tab === 'feed' && <LiveFeed activity={activity} />}
-            {tab === 'pipeline' && <PipelineTab codes={codes} />}
+            {tab === 'pipeline' && <PipelineTab codes={codes} p2Data={p2Data} regData={regData} p3Data={p3Data} p4Data={p4Data} scoringData={scoringData} onSelect={handleSelectCode} />}
             {tab === 'codes' && <CodesTab codes={codes} onSelect={handleSelectCode} />}
             {tab === 'detail' && <DetailTab hs4={selectedCode} codes={codes} p2Data={p2Data} p3Data={p3Data} p4Data={p4Data} scoringData={scoringData} />}
+            {tab === 'volza' && <VolzaDataTab />}
             {tab === 'trial' && <TrialRunTab />}
             {tab === 'scoring' && <ScoringMatrixTab />}
             {tab === 'sources' && <SourcesTab />}
