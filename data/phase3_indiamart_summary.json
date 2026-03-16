@@ -1,0 +1,24 @@
+[
+  {
+    "hs4": "8504",
+    "keywords_searched": 5,
+    "total_sellers": 18000,
+    "manufacturer_pct": 40.0,
+    "trader_pct": 60.0,
+    "price_low_inr": 350.0,
+    "price_high_inr": 500000.0,
+    "price_typical_inr": 8000.0,
+    "top_cities": "[\"Mumbai\", \"Delhi\", \"Pune\", \"Ahmedabad\", \"Chennai\"]",
+    "google_trends_direction": "Rising",
+    "justdial_count": 62,
+    "fob_typical_usd": 50.0,
+    "landed_cost_inr": 6338.959999999999,
+    "sell_price_inr": 8000.0,
+    "gross_margin_pct": 20.8,
+    "gross_margin_inr": 1661.0,
+    "kill_signal": 0,
+    "kill_reason": null,
+    "demand_score": 7.5,
+    "completed_at": "2026-03-16T20:00:49.798329"
+  }
+]

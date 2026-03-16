@@ -1,0 +1,19 @@
+[
+  {
+    "hs4": "8504",
+    "keywords_searched": 3,
+    "total_suppliers": 1270,
+    "verified_suppliers": 20,
+    "gold_supplier_pct": 0.0,
+    "fob_lowest_usd": 7.85,
+    "fob_highest_usd": 1682.0,
+    "fob_typical_usd": 75.0,
+    "typical_moq": "1-50 pieces",
+    "ready_to_ship_available": 0,
+    "trade_assurance_available": 0,
+    "top_suppliers": "[\"Shenzhen Meind\", \"Dongguan Kaiwen\", \"Guangzhou Felicity\"]",
+    "kill_signal": 0,
+    "kill_reason": null,
+    "completed_at": "2026-03-16T20:00:49.798329"
+  }
+]
