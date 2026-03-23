@@ -438,18 +438,18 @@ export default function ElectronicsResearch() {
               </div>
               <div>
                 {[
-                  { label: 'Gross Margin', val: scor.gross_margin_score, max: 25 },
-                  { label: 'Buyer Access', val: scor.buyer_accessibility_score, max: 20 },
-                  { label: 'Supply Reliability', val: scor.supply_reliability_score, max: 15 },
-                  { label: 'Market Size', val: scor.market_size_score, max: 15 },
-                  { label: 'Regulatory Risk', val: scor.regulatory_score, max: 15 },
-                  { label: 'Competition', val: scor.competition_score, max: 10 },
-                  { label: 'Growth Trend', val: scor.growth_score, max: 10 },
-                  { label: 'Working Capital', val: scor.working_capital_score, max: 10 },
-                  { label: 'Logistics', val: scor.logistics_score, max: 10 },
-                  { label: 'Obsolescence', val: scor.obsolescence_score, max: 10 },
-                  { label: 'Capital Required', val: scor.capital_score, max: 5 },
-                  { label: 'FTA Opportunity', val: scor.fta_score, max: 5 },
+                  { label: 'Gross Margin', val: scor.score_margin, max: 25 },
+                  { label: 'Buyer Access', val: scor.score_buyer_access, max: 20 },
+                  { label: 'Supply Reliability', val: scor.score_supply, max: 15 },
+                  { label: 'Market Size', val: scor.score_market_size, max: 15 },
+                  { label: 'Regulatory Risk', val: scor.score_regulatory, max: 15 },
+                  { label: 'Competition', val: scor.score_competition, max: 10 },
+                  { label: 'Growth Trend', val: scor.score_growth, max: 10 },
+                  { label: 'Working Capital', val: scor.score_working_capital, max: 10 },
+                  { label: 'Logistics', val: scor.score_logistics, max: 10 },
+                  { label: 'Obsolescence', val: scor.score_obsolescence, max: 10 },
+                  { label: 'Capital Required', val: scor.score_capital, max: 5 },
+                  { label: 'FTA Opportunity', val: scor.score_fta, max: 5 },
                 ].map(f => <ProgressBar key={f.label} label={`${f.label} (${f.val || 0}/${f.max})`} value={f.val || 0} max={f.max} color={f.val >= f.max * 0.7 ? '#34d399' : f.val >= f.max * 0.4 ? '#4f8cff' : '#f87171'} />)}
               </div>
             </div>
@@ -718,18 +718,18 @@ export default function ElectronicsResearch() {
                       <SortHeader label="HS4" field="hs4" {...scorSF} />
                       <SortHeader label="Total" field="total_score" {...scorSF} />
                       <SortHeader label="Verdict" field="verdict" {...scorSF} />
-                      <SortHeader label="Margin" field="gross_margin_score" {...scorSF} style={{ fontSize: '11px' }} />
-                      <SortHeader label="Buyers" field="buyer_accessibility_score" {...scorSF} style={{ fontSize: '11px' }} />
-                      <SortHeader label="Supply" field="supply_reliability_score" {...scorSF} style={{ fontSize: '11px' }} />
-                      <SortHeader label="Market" field="market_size_score" {...scorSF} style={{ fontSize: '11px' }} />
-                      <SortHeader label="Reg Risk" field="regulatory_score" {...scorSF} style={{ fontSize: '11px' }} />
-                      <SortHeader label="Comp" field="competition_score" {...scorSF} style={{ fontSize: '11px' }} />
-                      <SortHeader label="Growth" field="growth_score" {...scorSF} style={{ fontSize: '11px' }} />
-                      <SortHeader label="WC" field="working_capital_score" {...scorSF} style={{ fontSize: '11px' }} />
-                      <SortHeader label="Logis" field="logistics_score" {...scorSF} style={{ fontSize: '11px' }} />
-                      <SortHeader label="Obsol" field="obsolescence_score" {...scorSF} style={{ fontSize: '11px' }} />
-                      <SortHeader label="Cap" field="capital_score" {...scorSF} style={{ fontSize: '11px' }} />
-                      <SortHeader label="FTA" field="fta_score" {...scorSF} style={{ fontSize: '11px' }} />
+                      <SortHeader label="Margin" field="score_margin" {...scorSF} style={{ fontSize: '11px' }} />
+                      <SortHeader label="Buyers" field="score_buyer_access" {...scorSF} style={{ fontSize: '11px' }} />
+                      <SortHeader label="Supply" field="score_supply" {...scorSF} style={{ fontSize: '11px' }} />
+                      <SortHeader label="Market" field="score_market_size" {...scorSF} style={{ fontSize: '11px' }} />
+                      <SortHeader label="Reg Risk" field="score_regulatory" {...scorSF} style={{ fontSize: '11px' }} />
+                      <SortHeader label="Comp" field="score_competition" {...scorSF} style={{ fontSize: '11px' }} />
+                      <SortHeader label="Growth" field="score_growth" {...scorSF} style={{ fontSize: '11px' }} />
+                      <SortHeader label="WC" field="score_working_capital" {...scorSF} style={{ fontSize: '11px' }} />
+                      <SortHeader label="Logis" field="score_logistics" {...scorSF} style={{ fontSize: '11px' }} />
+                      <SortHeader label="Obsol" field="score_obsolescence" {...scorSF} style={{ fontSize: '11px' }} />
+                      <SortHeader label="Cap" field="score_capital" {...scorSF} style={{ fontSize: '11px' }} />
+                      <SortHeader label="FTA" field="score_fta" {...scorSF} style={{ fontSize: '11px' }} />
                     </tr>
                   </thead>
                   <tbody>
@@ -741,18 +741,18 @@ export default function ElectronicsResearch() {
                           <td style={{ ...tdStyle, color: '#e2e8f0', fontWeight: '600' }}>{s.hs4}</td>
                           <td style={{ ...tdStyle, color: scoreColor, fontWeight: '700', fontSize: '16px' }}>{s.total_score}/150</td>
                           <td style={tdStyle}><Badge label={s.verdict} color={s.verdict === 'PURSUE' ? 'pass' : s.verdict === 'STRONG' ? 'blue' : 'maybe'} /></td>
-                          <td style={{ ...tdStyle, color: cellColor(s.gross_margin_score, 25) }}>{s.gross_margin_score || 0}/25</td>
-                          <td style={{ ...tdStyle, color: cellColor(s.buyer_accessibility_score, 20) }}>{s.buyer_accessibility_score || 0}/20</td>
-                          <td style={{ ...tdStyle, color: cellColor(s.supply_reliability_score, 15) }}>{s.supply_reliability_score || 0}/15</td>
-                          <td style={{ ...tdStyle, color: cellColor(s.market_size_score, 15) }}>{s.market_size_score || 0}/15</td>
-                          <td style={{ ...tdStyle, color: cellColor(s.regulatory_score, 15) }}>{s.regulatory_score || 0}/15</td>
-                          <td style={{ ...tdStyle, color: cellColor(s.competition_score, 10) }}>{s.competition_score || 0}/10</td>
-                          <td style={{ ...tdStyle, color: cellColor(s.growth_score, 10) }}>{s.growth_score || 0}/10</td>
-                          <td style={{ ...tdStyle, color: cellColor(s.working_capital_score, 10) }}>{s.working_capital_score || 0}/10</td>
-                          <td style={{ ...tdStyle, color: cellColor(s.logistics_score, 10) }}>{s.logistics_score || 0}/10</td>
-                          <td style={{ ...tdStyle, color: cellColor(s.obsolescence_score, 10) }}>{s.obsolescence_score || 0}/10</td>
-                          <td style={{ ...tdStyle, color: cellColor(s.capital_score, 5) }}>{s.capital_score || 0}/5</td>
-                          <td style={{ ...tdStyle, color: cellColor(s.fta_score, 5) }}>{s.fta_score || 0}/5</td>
+                          <td style={{ ...tdStyle, color: cellColor(s.score_margin, 25) }}>{s.score_margin || 0}/25</td>
+                          <td style={{ ...tdStyle, color: cellColor(s.score_buyer_access, 20) }}>{s.score_buyer_access || 0}/20</td>
+                          <td style={{ ...tdStyle, color: cellColor(s.score_supply, 15) }}>{s.score_supply || 0}/15</td>
+                          <td style={{ ...tdStyle, color: cellColor(s.score_market_size, 15) }}>{s.score_market_size || 0}/15</td>
+                          <td style={{ ...tdStyle, color: cellColor(s.score_regulatory, 15) }}>{s.score_regulatory || 0}/15</td>
+                          <td style={{ ...tdStyle, color: cellColor(s.score_competition, 10) }}>{s.score_competition || 0}/10</td>
+                          <td style={{ ...tdStyle, color: cellColor(s.score_growth, 10) }}>{s.score_growth || 0}/10</td>
+                          <td style={{ ...tdStyle, color: cellColor(s.score_working_capital, 10) }}>{s.score_working_capital || 0}/10</td>
+                          <td style={{ ...tdStyle, color: cellColor(s.score_logistics, 10) }}>{s.score_logistics || 0}/10</td>
+                          <td style={{ ...tdStyle, color: cellColor(s.score_obsolescence, 10) }}>{s.score_obsolescence || 0}/10</td>
+                          <td style={{ ...tdStyle, color: cellColor(s.score_capital, 5) }}>{s.score_capital || 0}/5</td>
+                          <td style={{ ...tdStyle, color: cellColor(s.score_fta, 5) }}>{s.score_fta || 0}/5</td>
                         </tr>
                       );
                     })}
