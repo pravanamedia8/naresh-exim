@@ -3,7 +3,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   Cell, Legend
 } from 'recharts';
-import { fetchApi } from '../api';
+import { supabase } from '../supabaseClient';
 
 const HS2Chapters = () => {
   const [chapters, setChapters] = useState([]);
@@ -19,11 +19,12 @@ const HS2Chapters = () => {
     const loadData = async () => {
       try {
         setLoading(true);
-        const data = await fetchApi('hs2_analysis');
-        setChapters(data.chapters || []);
+        const { data, error } = await supabase.from('hs2_scored').select('*').order('chapter_score', { ascending: false });
+        if (error) throw error;
+        setChapters(data || []);
         setError(null);
       } catch (err) {
-        setError(err.message || 'Failed to load HS2 chapters');
+        setError(err.message || 'Data will appear here as research progresses');
         console.error('Error loading HS2 chapters:', err);
       } finally {
         setLoading(false);

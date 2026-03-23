@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { fetchApi } from '../api';
+import { supabase } from '../supabaseClient';
 
 const COLORS = ['#4f8cff','#34d399','#fbbf24','#f87171','#a78bfa','#fb923c'];
 
@@ -43,14 +43,15 @@ export default function Importers() {
   const [verifiedFilter, setVerifiedFilter] = useState(false);
 
   useEffect(() => {
-    fetchApi('importers')
-      .then(d => {
-        setImporters((d.importers || []).sort((a,b) => (b.middleman_score||0) - (a.middleman_score||0)));
+    supabase.from('importers_classified').select('*')
+      .then(({ data, error: err }) => {
+        if (err) throw err;
+        setImporters((data || []).sort((a,b) => (b.middleman_score||0) - (a.middleman_score||0)));
         setError(null);
       })
       .catch(err => {
         console.error(err);
-        setError('Failed to load importers data');
+        setError('Data will appear here as importers are classified');
       })
       .finally(() => setLoading(false));
   }, []);

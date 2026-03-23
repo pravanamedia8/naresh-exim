@@ -3,7 +3,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell,
   PieChart, Pie, Legend
 } from 'recharts';
-import { fetchApi } from '../api';
+import { supabase } from '../supabaseClient';
 
 const COLORS = ['#4f8cff', '#34d399', '#fbbf24', '#f87171', '#a78bfa', '#fb923c'];
 
@@ -20,18 +20,17 @@ export default function BusinessIntel() {
         setLoading(true);
         setError(null);
 
-        const [marginsData, intelData, shortlistData] = await Promise.all([
-          fetchApi('margins').catch(() => ({ margins: [] })),
-          fetchApi('business_intel').catch(() => ({ forecasts: [], summary: {} })),
-          fetchApi('shortlist').catch(() => ({ products: [] }))
+        const [marginsData, shortlistData] = await Promise.all([
+          supabase.from('margin_analysis').select('*').order('hs4'),
+          supabase.from('shortlist').select('*').order('drill_score', { ascending: false })
         ]);
 
-        setMargins(marginsData.margins || []);
-        setBusinessIntel(intelData || { forecasts: [], summary: {} });
-        setShortlist(shortlistData.products || []);
+        setMargins(marginsData.data || []);
+        setBusinessIntel({ forecasts: [], summary: {} });
+        setShortlist(shortlistData.data || []);
       } catch (err) {
         console.error('Error loading business intel data:', err);
-        setError('Error loading business intelligence data');
+        setError('Data will appear here as research progresses');
       } finally {
         setLoading(false);
       }

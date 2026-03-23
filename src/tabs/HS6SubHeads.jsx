@@ -9,7 +9,7 @@ import {
   ResponsiveContainer,
   Cell,
 } from 'recharts';
-import { fetchApi } from '../api';
+import { supabase } from '../supabaseClient';
 
 export default function HS6SubHeads() {
   const [data, setData] = useState([]);
@@ -34,11 +34,35 @@ export default function HS6SubHeads() {
     const loadData = async () => {
       try {
         setLoading(true);
-        const response = await fetchApi('hs6_data');
-        setData(response.hs6_data || []);
+        const { data: hs8Data, error } = await supabase.from('hs8_raw').select('*');
+        if (error) throw error;
+
+        // Group HS8 data by HS6 code
+        const hs6Map = {};
+        (hs8Data || []).forEach(row => {
+          const hs6 = row.hs6;
+          if (!hs6Map[hs6]) {
+            hs6Map[hs6] = {
+              hs6,
+              hs4: row.hs4,
+              hs2: row.hs2,
+              commodities: row.commodity,
+              hs8_count: 1,
+              total_val: row.val_2024_25 || 0,
+              val_2023_24: row.val_2023_24 || 0,
+              avg_growth: row.growth_1yr || 0,
+            };
+          } else {
+            hs6Map[hs6].hs8_count++;
+            hs6Map[hs6].total_val += row.val_2024_25 || 0;
+            hs6Map[hs6].avg_growth = (hs6Map[hs6].avg_growth + (row.growth_1yr || 0)) / 2;
+          }
+        });
+
+        setData(Object.values(hs6Map));
         setError(null);
       } catch (err) {
-        setError(err.message || 'Failed to load data');
+        setError(err.message || 'Data will appear here as research progresses');
         setData([]);
       } finally {
         setLoading(false);

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LineChart, Line } from 'recharts';
-import { fetchApi } from '../api';
+import { supabase } from '../supabaseClient';
 
 const COLORS = ['#4f8cff', '#34d399', '#fbbf24', '#f87171', '#a78bfa', '#fb923c', '#22d3ee', '#f472b6', '#84cc16', '#e879f9'];
 
@@ -62,40 +62,121 @@ export default function Shipments() {
     return params.toString();
   }, [page, pageSize, sortCol, sortDir, search, hs4Filter, countryFilter, portFilter, shipModeFilter, consigneeFilter, shipperFilter, minCif, maxCif]);
 
-  // Fetch shipments from server
+  // Fetch shipments from Supabase
   const fetchShipments = useCallback(async (queryOverride) => {
     setTableLoading(true);
     try {
-      const qs = queryOverride || buildQuery();
-      const data = await fetchApi(`shipments?${qs}`);
-      setShipments(data.shipments || []);
-      setTotal(data.total || 0);
-      setFilteredTotal(data.filtered_total || 0);
-      setTotalPages(data.total_pages || 1);
+      const p = page;
+      const from = p * pageSize;
+      const to = from + pageSize - 1;
+
+      let query = supabase.from('volza_shipments').select('*', { count: 'exact' });
+
+      // Apply filters
+      if (search) {
+        query = query.or(`product_desc.ilike.%${search}%,consignee_name.ilike.%${search}%,shipper_name.ilike.%${search}%`);
+      }
+      if (hs4Filter) query = query.eq('hs4', hs4Filter);
+      if (countryFilter) query = query.eq('country_origin', countryFilter);
+      if (portFilter) query = query.eq('port_dest', portFilter);
+      if (shipModeFilter) query = query.eq('ship_mode', shipModeFilter);
+      if (consigneeFilter) query = query.ilike('consignee_name', `%${consigneeFilter}%`);
+      if (shipperFilter) query = query.ilike('shipper_name', `%${shipperFilter}%`);
+      if (minCif) query = query.gte('cif_value_usd', parseFloat(minCif));
+      if (maxCif) query = query.lte('cif_value_usd', parseFloat(maxCif));
+
+      // Apply sorting and pagination
+      query = query.order(sortCol, { ascending: sortDir === 'asc' }).range(from, to);
+
+      const { data, error, count } = await query;
+      if (error) throw error;
+
+      setShipments(data || []);
+      setTotal(count || 0);
+      setFilteredTotal(data?.length || 0);
+      setTotalPages(Math.ceil((count || 0) / pageSize));
     } catch (err) {
       console.error('Failed to fetch shipments:', err);
     } finally {
       setTableLoading(false);
     }
-  }, [buildQuery]);
+  }, [page, pageSize, sortCol, sortDir, search, hs4Filter, countryFilter, portFilter, shipModeFilter, consigneeFilter, shipperFilter, minCif, maxCif]);
 
   // Initial load: stats + filters + first page of data
   useEffect(() => {
     const loadInitial = async () => {
       try {
-        const [statsData, filtersData, shipData] = await Promise.all([
-          fetchApi('shipment_stats'),
-          fetchApi('shipment_filters'),
-          fetchApi('shipments?page=0&page_size=50&sort=id&dir=desc')
-        ]);
+        const { data, error, count } = await supabase.from('volza_shipments').select('*', { count: 'exact' }).limit(1);
+        if (error) throw error;
+
+        // Build stats from all shipments
+        const allShips = await supabase.from('volza_shipments').select('hs4, country_origin, port_dest, port_origin, date, consignee_name, shipper_name, cif_value_usd');
+        const shipData = allShips.data || [];
+
+        // Calculate by_hs4
+        const hs4Map = {};
+        shipData.forEach(s => {
+          const hs4 = s.hs4 || 'Unknown';
+          if (!hs4Map[hs4]) hs4Map[hs4] = { hs4, shipments: 0, total_cif: 0, avg_rate: 0 };
+          hs4Map[hs4].shipments++;
+          hs4Map[hs4].total_cif += s.cif_value_usd || 0;
+        });
+
+        // Calculate by country, port, month, top consignees, top shippers similarly
+        const countryMap = {}, portMap = {}, monthMap = {}, consigneeMap = {}, shipperMap = {};
+
+        shipData.forEach(s => {
+          const country = s.country_origin || 'Unknown';
+          if (!countryMap[country]) countryMap[country] = { country_origin: country, shipments: 0, total_cif: 0 };
+          countryMap[country].shipments++;
+          countryMap[country].total_cif += s.cif_value_usd || 0;
+
+          const port = s.port_dest || 'Unknown';
+          if (!portMap[port]) portMap[port] = { port_dest: port, shipments: 0, total_cif: 0 };
+          portMap[port].shipments++;
+          portMap[port].total_cif += s.cif_value_usd || 0;
+
+          const month = s.date ? s.date.substring(0, 7) : 'Unknown';
+          if (!monthMap[month]) monthMap[month] = { month, shipments: 0, total_cif: 0 };
+          monthMap[month].shipments++;
+          monthMap[month].total_cif += s.cif_value_usd || 0;
+
+          const consignee = s.consignee_name || 'Unknown';
+          if (!consigneeMap[consignee]) consigneeMap[consignee] = { consignee_name: consignee, shipments: 0, total_cif: 0 };
+          consigneeMap[consignee].shipments++;
+          consigneeMap[consignee].total_cif += s.cif_value_usd || 0;
+
+          const shipper = s.shipper_name || 'Unknown';
+          if (!shipperMap[shipper]) shipperMap[shipper] = { shipper_name: shipper, shipments: 0, total_cif: 0 };
+          shipperMap[shipper].shipments++;
+          shipperMap[shipper].total_cif += s.cif_value_usd || 0;
+        });
+
+        const statsData = {
+          by_hs4: Object.values(hs4Map),
+          by_country: Object.values(countryMap),
+          by_port: Object.values(portMap),
+          by_month: Object.values(monthMap),
+          top_consignees: Object.values(consigneeMap).sort((a, b) => b.total_cif - a.total_cif).slice(0, 10),
+          top_shippers: Object.values(shipperMap).sort((a, b) => b.total_cif - a.total_cif).slice(0, 10)
+        };
+
         setStats(statsData);
-        setFilterOptions(filtersData);
-        setShipments(shipData.shipments || []);
-        setTotal(shipData.total || 0);
-        setFilteredTotal(shipData.filtered_total || 0);
-        setTotalPages(shipData.total_pages || 1);
+        setFilterOptions({
+          hs4_codes: [...new Set(shipData.map(s => s.hs4).filter(Boolean))],
+          countries: [...new Set(shipData.map(s => s.country_origin).filter(Boolean))],
+          ports: [...new Set(shipData.map(s => s.port_dest).filter(Boolean))]
+        });
+
+        // Load first page
+        const { data: pageData, error: pageError, count: pageCount } = await supabase.from('volza_shipments').select('*', { count: 'exact' }).order('id', { ascending: false }).limit(50);
+        if (pageError) throw pageError;
+        setShipments(pageData || []);
+        setTotal(pageCount || 0);
+        setFilteredTotal(pageData?.length || 0);
+        setTotalPages(Math.ceil((pageCount || 0) / 50));
       } catch (err) {
-        setError(err.message || 'Failed to load shipments');
+        setError(err.message || 'Data will appear here as Volza research progresses');
       } finally {
         setLoading(false);
       }

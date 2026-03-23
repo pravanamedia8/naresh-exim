@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts';
-import { fetchApi } from '../api';
+import { supabase } from '../supabaseClient';
 
 const HS8Raw = () => {
   const [hs8Data, setHs8Data] = useState([]);
@@ -26,11 +26,12 @@ const HS8Raw = () => {
     const loadData = async () => {
       try {
         setLoading(true);
-        const data = await fetchApi('hs8_raw');
-        setHs8Data(data.hs8_raw || data.hs8_data || []);
+        const { data, error } = await supabase.from('hs8_raw').select('*').order('val_2024_25', { ascending: false });
+        if (error) throw error;
+        setHs8Data(data || []);
         setError(null);
       } catch (err) {
-        setError(err.message || 'Failed to load HS8 raw data');
+        setError(err.message || 'Data will appear here as research progresses');
         console.error('Error loading HS8 raw data:', err);
       } finally {
         setLoading(false);

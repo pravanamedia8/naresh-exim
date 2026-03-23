@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { fetchApi } from '../api';
+import { supabase } from '../supabaseClient';
 
 const COLORS = ['#4f8cff','#34d399','#fbbf24','#f87171','#a78bfa','#fb923c','#22d3ee','#f472b6'];
 
@@ -31,10 +31,13 @@ export default function BuyersTargets() {
   const PAGE_SIZE = 100;
 
   useEffect(() => {
-    Promise.all([fetchApi('targets'), fetchApi('buyers')])
-      .then(([t, b]) => {
-        setTargets(t.targets || []);
-        setBuyers(b.buyers || []);
+    Promise.all([
+      supabase.from('target_buyers').select('*'),
+      supabase.from('volza_buyers').select('*')
+    ])
+      .then(([{ data: t }, { data: b }]) => {
+        setTargets(t || []);
+        setBuyers(b || []);
       })
       .catch(console.error)
       .finally(() => setLoading(false));

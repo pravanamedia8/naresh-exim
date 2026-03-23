@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
-import { fetchApi } from '../api';
+import { supabase } from '../supabaseClient';
 
 const STAGE_COLORS = ['#4f8cff','#34d399','#fbbf24','#f87171','#a78bfa','#fb923c','#22d3ee','#f472b6'];
 
@@ -12,15 +12,46 @@ export default function PipelineJourney() {
   const [margins, setMargins] = useState([]);
 
   useEffect(() => {
-    Promise.all([fetchApi('pipeline_journey'), fetchApi('margins')])
-      .then(([j, m]) => {
-        setFunnel(j.funnel || []);
-        setDecisions(j.decisions || {});
-        setInsights(j.key_insights || []);
-        setMargins(m.margins || []);
-      })
-      .catch(console.error)
-      .finally(() => setLoading(false));
+    const loadData = async () => {
+      try {
+        const [stages, shortlistData, marginData] = await Promise.all([
+          supabase.from('pipeline_stages').select('*').order('sort_order'),
+          supabase.from('shortlist').select('*').order('drill_score', { ascending: false }),
+          supabase.from('margin_analysis').select('*').order('hs4')
+        ]);
+
+        // Build funnel from pipeline stages with shortlist counts
+        const stageMap = {};
+        shortlistData.data?.forEach(p => {
+          const stage = p.pipeline_stage || 'Unknown';
+          stageMap[stage] = (stageMap[stage] || 0) + 1;
+        });
+
+        const funnel = (stages.data || []).map(s => ({
+          stage: s.stage,
+          name: s.name,
+          description: s.description,
+          count: stageMap[s.stage] || 0
+        }));
+
+        // Categorize products
+        const products = shortlistData.data || [];
+        const pursue = products.filter(p => p.verdict === 'PASS').slice(0, 15);
+        const marginal = products.filter(p => p.verdict === 'MAYBE').slice(0, 8);
+        const avoid = products.filter(p => p.verdict === 'WATCH' || p.verdict === 'DROP').slice(0, 8);
+
+        setFunnel(funnel);
+        setDecisions({ pursue, marginal, avoid });
+        setMargins(marginData.data || []);
+        setInsights([]);
+      } catch (err) {
+        console.error('Error loading pipeline data:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadData();
   }, []);
 
   if (loading) return <div className="loading">⏳ Loading Pipeline Journey...</div>;

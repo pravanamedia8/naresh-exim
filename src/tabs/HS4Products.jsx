@@ -13,7 +13,7 @@ import {
   Scatter,
   ZAxis,
 } from 'recharts';
-import { fetchApi } from '../api';
+import { supabase } from '../supabaseClient';
 
 const HS4Products = () => {
   const [products, setProducts] = useState([]);
@@ -38,15 +38,14 @@ const HS4Products = () => {
     const loadData = async () => {
       try {
         setLoading(true);
-        const response = await fetchApi('hs4_top');
-        if (response && response.top) {
-          setProducts(response.top);
-          setError(null);
-        } else {
-          setError('No data received from API');
-        }
+        const { data, error } = await supabase.from('hs4_scored').select('*').order('drill_score', { ascending: false });
+        if (error) throw error;
+        const products = data || [];
+        setProducts(products);
+        setError(null);
       } catch (err) {
-        setError(err.message);
+        setError(err.message || 'Data will appear here as research progresses');
+        console.error('Error loading HS4 products:', err);
       } finally {
         setLoading(false);
       }

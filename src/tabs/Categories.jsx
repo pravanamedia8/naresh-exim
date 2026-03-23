@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { fetchApi } from '../api';
+import { supabase } from '../supabaseClient';
 
 const COLORS = ['#4f8cff','#34d399','#fbbf24','#f87171','#a78bfa','#fb923c','#22d3ee','#f472b6','#818cf8','#94a3b8'];
 
@@ -9,7 +9,47 @@ export default function Categories() {
   const [categories, setCategories] = useState([]);
 
   useEffect(() => {
-    fetchApi('categories').then(d => setCategories(d.categories || [])).catch(console.error).finally(() => setLoading(false));
+    const loadData = async () => {
+      try {
+        const { data, error } = await supabase.from('hs4_scored').select('category, verdict, drill_score');
+        if (error) throw error;
+
+        // Group by category
+        const categoryMap = {};
+        (data || []).forEach(row => {
+          if (!categoryMap[row.category]) {
+            categoryMap[row.category] = {
+              category: row.category,
+              count: 0,
+              pass_count: 0,
+              maybe_count: 0,
+              watch_count: 0,
+              drop_count: 0,
+              avg_score: 0,
+              total_score: 0,
+              total_value_m: 0
+            };
+          }
+          categoryMap[row.category].count++;
+          categoryMap[row.category].total_score += row.drill_score || 0;
+          if (row.verdict === 'PASS') categoryMap[row.category].pass_count++;
+          else if (row.verdict === 'MAYBE') categoryMap[row.category].maybe_count++;
+          else if (row.verdict === 'WATCH') categoryMap[row.category].watch_count++;
+          else if (row.verdict === 'DROP') categoryMap[row.category].drop_count++;
+        });
+
+        Object.values(categoryMap).forEach(c => {
+          c.avg_score = c.count > 0 ? c.total_score / c.count : 0;
+        });
+
+        setCategories(Object.values(categoryMap));
+      } catch (err) {
+        console.error('Error loading categories:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadData();
   }, []);
 
   if (loading) return <div className="loading">⏳ Loading Categories...</div>;

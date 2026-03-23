@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell } from 'recharts';
-import { fetchApi } from '../api';
+import { supabase } from '../supabaseClient';
 
 const COLORS = ['#4f8cff','#34d399','#fbbf24','#f87171','#a78bfa','#fb923c'];
 
@@ -84,9 +84,10 @@ export default function ScoringRef() {
   const [config, setConfig] = useState([]);
 
   useEffect(() => {
-    fetchApi('scoring_config')
-      .then(d => {
-        setConfig(d.scoring_config || []);
+    supabase.from('scoring_config').select('*')
+      .then(({ data, error: err }) => {
+        if (err) throw err;
+        setConfig(data || []);
         setError(null);
       })
       .catch(err => {

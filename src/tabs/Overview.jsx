@@ -3,7 +3,7 @@ import {
   PieChart, Pie, Cell,
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
 } from 'recharts';
-import { fetchApi } from '../api';
+import { supabase } from '../supabaseClient';
 
 const Overview = () => {
   const [loading, setLoading] = useState(true);
@@ -17,16 +17,66 @@ const Overview = () => {
         setLoading(true);
         setError(null);
 
-        const [overview, categories] = await Promise.all([
-          fetchApi('overview'),
-          fetchApi('categories')
+        // Fetch counts from all tables
+        const [hs8, hs4, hs2, shortlist, ps, volza_ships, volza_buyers, targets, margins, importers] = await Promise.all([
+          supabase.from('hs8_raw').select('*', { count: 'exact' }).limit(1),
+          supabase.from('hs4_scored').select('*', { count: 'exact' }).limit(1),
+          supabase.from('hs2_scored').select('*', { count: 'exact' }).limit(1),
+          supabase.from('shortlist').select('*', { count: 'exact' }).limit(1),
+          supabase.from('pipeline_stages').select('*'),
+          supabase.from('volza_shipments').select('*', { count: 'exact' }).limit(1),
+          supabase.from('volza_buyers').select('*', { count: 'exact' }).limit(1),
+          supabase.from('target_buyers').select('*', { count: 'exact' }).limit(1),
+          supabase.from('margin_analysis').select('*', { count: 'exact' }).limit(1),
+          supabase.from('importers_classified').select('*', { count: 'exact' }).limit(1)
         ]);
 
+        // Calculate verdict breakdown from hs4_scored
+        const hs4Data = await supabase.from('hs4_scored').select('verdict');
+        const verdictBreakdown = { PASS: 0, MAYBE: 0, WATCH: 0, DROP: 0 };
+        hs4Data.data?.forEach(row => {
+          if (row.verdict && verdictBreakdown.hasOwnProperty(row.verdict)) {
+            verdictBreakdown[row.verdict]++;
+          }
+        });
+
+        // Get categories data from hs4_scored
+        const allHs4 = await supabase.from('hs4_scored').select('category, verdict, drill_score');
+        const categoryMap = {};
+        allHs4.data?.forEach(row => {
+          if (!categoryMap[row.category]) {
+            categoryMap[row.category] = { category: row.category, count: 0, pass_count: 0, maybe_count: 0, watch_count: 0, drop_count: 0, avg_score: 0, total_score: 0 };
+          }
+          categoryMap[row.category].count++;
+          categoryMap[row.category].total_score += row.drill_score || 0;
+          if (row.verdict === 'PASS') categoryMap[row.category].pass_count++;
+          else if (row.verdict === 'MAYBE') categoryMap[row.category].maybe_count++;
+          else if (row.verdict === 'WATCH') categoryMap[row.category].watch_count++;
+          else if (row.verdict === 'DROP') categoryMap[row.category].drop_count++;
+        });
+        Object.values(categoryMap).forEach(c => { c.avg_score = c.total_score / c.count; });
+
+        const overview = {
+          counts: {
+            hs8_raw: hs8.count || 0,
+            hs4_scored: hs4.count || 0,
+            hs2_scored: hs2.count || 0,
+            shortlist: shortlist.count || 0,
+            volza_shipments: volza_ships.count || 0,
+            volza_buyers: volza_buyers.count || 0,
+            target_buyers: targets.count || 0,
+            margin_analysis: margins.count || 0,
+            importers_classified: importers.count || 0,
+            verdict_breakdown: verdictBreakdown
+          },
+          pipeline_stages: (ps.data || []).sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))
+        };
+
         setOverviewData(overview);
-        setCategoryData(categories);
+        setCategoryData({ categories: Object.values(categoryMap) });
       } catch (err) {
         console.error('Error loading overview data:', err);
-        setError('Error loading data');
+        setError('Data will appear here as research progresses');
       } finally {
         setLoading(false);
       }

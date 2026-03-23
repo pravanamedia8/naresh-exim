@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { fetchApi } from '../api';
+import { supabase } from '../supabaseClient';
 
 const COLORS = ['#4f8cff', '#34d399', '#fbbf24', '#f87171'];
 
@@ -14,8 +14,10 @@ export default function Margins() {
     const loadData = async () => {
       try {
         setLoading(true);
-        const data = await fetchApi('margins');
-        const marginsList = data.margins || [];
+        const { data, error } = await supabase.from('margin_analysis').select('*').order('hs4');
+        if (error) throw error;
+
+        const marginsList = data || [];
         setMargins(marginsList);
 
         const marginChart = marginsList.slice(0, 15).map((m) => ({
