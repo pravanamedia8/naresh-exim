@@ -9,7 +9,8 @@ const PHASE_LABELS = {
   phase1_complete: 'Phase 1: DB Screen', phase2_pending: 'Phase 2: Alibaba', phase2_done: 'Phase 2 Done',
   phase2b_pending: 'Phase 2b: Regulatory', phase2b_done: 'Phase 2b Done', phase3_pending: 'Phase 3: IndiaMART',
   phase3_done: 'Phase 3 Done', qa_pending: 'QA Gate', qa_pass: 'QA Pass', phase4_pending: 'Phase 4: Volza',
-  phase4_done: 'Phase 4 Done', phase5_pending: 'Phase 5: Scoring', phase5_done: 'Complete', 'N/A': 'Complete',
+  phase4_done: 'Phase 4 Done', phase5_pending: 'Phase 5: Scoring', phase5_done: 'Complete',
+  complete: 'Complete', COMPLETE: 'Complete', 'N/A': 'Complete',
 };
 
 // Reusable components
@@ -155,6 +156,10 @@ export default function ElectronicsResearch() {
     fetchData();
     const sub = supabase.channel('electronics_changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'research_codes' }, () => fetchData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'phase2b_regulatory' }, () => fetchData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'phase2_alibaba_summary' }, () => fetchData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'phase3_indiamart_summary' }, () => fetchData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'phase5_scoring' }, () => fetchData())
       .subscribe();
     return () => sub.unsubscribe();
   }, []);
@@ -185,16 +190,23 @@ export default function ElectronicsResearch() {
       ...c,
       total_duty_pct: regMap[c.hs4]?.total_duty_pct,
       regulatory_risk: regMap[c.hs4]?.regulatory_risk_score,
+      bcd_pct_reg: regMap[c.hs4]?.bcd_pct,
+      compliance_cost: regMap[c.hs4]?.total_compliance_cost_inr,
       total_suppliers: supMap[c.hs4]?.total_suppliers,
       fob_low: supMap[c.hs4]?.fob_lowest_usd,
       fob_high: supMap[c.hs4]?.fob_highest_usd,
+      fob_typical: supMap[c.hs4]?.fob_typical_usd,
       gold_pct: supMap[c.hs4]?.gold_supplier_pct,
       total_sellers: demMap[c.hs4]?.total_sellers,
       margin_pct: demMap[c.hs4]?.gross_margin_pct,
       price_low_inr: demMap[c.hs4]?.price_low_inr,
       price_high_inr: demMap[c.hs4]?.price_high_inr,
+      landed_cost: demMap[c.hs4]?.landed_cost_inr,
+      sell_price: demMap[c.hs4]?.sell_price_inr,
+      demand_score: demMap[c.hs4]?.demand_score,
       total_score: scorMap[c.hs4]?.total_score,
       verdict_score: scorMap[c.hs4]?.verdict,
+      go_nogo: scorMap[c.hs4]?.go_nogo_notes,
     }));
   }, [codes, regulatory, supply, demand, scoring]);
 
@@ -504,7 +516,7 @@ export default function ElectronicsResearch() {
   // Supply+demand merge
   const supplyDemand = useMemo(() => {
     const demMap = Object.fromEntries(demand.map(d => [d.hs4, d]));
-    return supply.map(s => ({ ...s, ...(demMap[s.hs4] ? { sellers: demMap[s.hs4].total_sellers, margin: demMap[s.hs4].gross_margin_pct, price_low: demMap[s.hs4].price_low_inr, price_high: demMap[s.hs4].price_high_inr, mfr_pct: demMap[s.hs4].manufacturer_pct, demand_score: demMap[s.hs4].demand_score } : {}) }));
+    return supply.map(s => ({ ...s, ...(demMap[s.hs4] ? { sellers: demMap[s.hs4].total_sellers, margin: demMap[s.hs4].gross_margin_pct, price_low: demMap[s.hs4].price_low_inr, price_high: demMap[s.hs4].price_high_inr, landed_cost_inr: demMap[s.hs4].landed_cost_inr, sell_price_inr: demMap[s.hs4].sell_price_inr, mfr_pct: demMap[s.hs4].manufacturer_pct, demand_score: demMap[s.hs4].demand_score } : {}) }));
   }, [supply, demand]);
   const sdSF = useSortFilter(supplyDemand, 'total_suppliers', 'desc');
 
@@ -604,16 +616,21 @@ export default function ElectronicsResearch() {
                     <SortHeader label="BCD %" field="bcd_pct" {...regSF} />
                     <SortHeader label="IGST %" field="igst_pct" {...regSF} />
                     <SortHeader label="SWS %" field="sws_pct" {...regSF} />
-                    <SortHeader label="Total Duty %" field="total_duty_pct" {...regSF} />
+                    <SortHeader label="AIDC %" field="aidc_pct" {...regSF} />
+                    <SortHeader label="Total %" field="total_duty_pct" {...regSF} />
                     <SortHeader label="Risk" field="regulatory_risk_score" {...regSF} />
                     <th style={thStyle}>ADD</th>
+                    <th style={thStyle}>Safe</th>
                     <th style={thStyle}>DGFT</th>
                     <th style={thStyle}>BIS</th>
                     <th style={thStyle}>WPC</th>
                     <th style={thStyle}>TEC</th>
+                    <th style={thStyle}>EPR</th>
+                    <th style={thStyle}>PMP</th>
                     <th style={thStyle}>FTA</th>
-                    <SortHeader label="Compliance ₹" field="total_compliance_cost_inr" {...regSF} />
-                    <SortHeader label="Sources" field="source_count" {...regSF} />
+                    <SortHeader label="Cost ₹" field="total_compliance_cost_inr" {...regSF} />
+                    <SortHeader label="Weeks" field="total_compliance_weeks" {...regSF} />
+                    <SortHeader label="Src" field="source_count" {...regSF} />
                   </tr>
                 </thead>
                 <tbody>
@@ -626,15 +643,20 @@ export default function ElectronicsResearch() {
                         <td style={tdStyle}>{r.bcd_pct?.toFixed(1) || '—'}</td>
                         <td style={tdStyle}>{r.igst_pct?.toFixed(1) || '—'}</td>
                         <td style={tdStyle}>{r.sws_pct?.toFixed(1) || '—'}</td>
+                        <td style={tdStyle}>{r.aidc_pct ? <span style={{ color: '#f87171' }}>{r.aidc_pct}%</span> : '—'}</td>
                         <td style={{ ...tdStyle, color: dutyColor, fontWeight: '600' }}>{r.total_duty_pct?.toFixed(2) || '—'}%</td>
                         <td style={{ ...tdStyle, color: riskColor, fontWeight: '600' }}>{r.regulatory_risk_score || '—'}</td>
                         <td style={tdStyle}>{r.check_anti_dumping ? <span style={{ color: '#f87171' }}>⚠ {r.add_rate_pct || ''}%</span> : '—'}</td>
+                        <td style={tdStyle}>{r.check_safeguard ? <span style={{ color: '#f87171' }}>⚠ {r.safeguard_pct || ''}%</span> : '—'}</td>
                         <td style={tdStyle}>{r.check_dgft_restriction ? <span style={{ color: '#f87171' }}>⚠</span> : '✓'}</td>
                         <td style={tdStyle}>{r.check_bis_qco ? <span style={{ color: '#fbbf24' }}>Req</span> : '—'}</td>
                         <td style={tdStyle}>{r.check_wpc ? <span style={{ color: '#fbbf24' }}>Req</span> : '—'}</td>
                         <td style={tdStyle}>{r.check_tec ? <span style={{ color: '#fbbf24' }}>Req</span> : '—'}</td>
+                        <td style={tdStyle}>{r.check_epr ? <span style={{ color: '#fbbf24' }}>Req</span> : '—'}</td>
+                        <td style={tdStyle}>{r.check_pmp ? <span style={{ color: '#fbbf24' }}>⚠</span> : '—'}</td>
                         <td style={tdStyle}>{r.check_fta ? <span style={{ color: '#34d399' }}>{r.fta_duty_reduction_pct || ''}%↓</span> : '—'}</td>
                         <td style={tdStyle}>{r.total_compliance_cost_inr ? `₹${(r.total_compliance_cost_inr / 1000).toFixed(0)}K` : '—'}</td>
+                        <td style={tdStyle}>{r.total_compliance_weeks || '—'}</td>
                         <td style={tdStyle}>{r.source_count || 0}</td>
                       </tr>
                     );
@@ -662,11 +684,14 @@ export default function ElectronicsResearch() {
                     <SortHeader label="Gold %" field="gold_supplier_pct" {...sdSF} />
                     <SortHeader label="FOB Low $" field="fob_lowest_usd" {...sdSF} />
                     <SortHeader label="FOB High $" field="fob_highest_usd" {...sdSF} />
+                    <SortHeader label="FOB Typ $" field="fob_typical_usd" {...sdSF} />
                     <th style={thStyle}>MOQ</th>
                     <SortHeader label="Sellers" field="sellers" {...sdSF} />
                     <SortHeader label="Mfr %" field="mfr_pct" {...sdSF} />
                     <SortHeader label="Price Low ₹" field="price_low" {...sdSF} />
                     <SortHeader label="Price High ₹" field="price_high" {...sdSF} />
+                    <SortHeader label="Landed ₹" field="landed_cost_inr" {...sdSF} />
+                    <SortHeader label="Sell ₹" field="sell_price_inr" {...sdSF} />
                     <SortHeader label="Margin %" field="margin" {...sdSF} />
                     <SortHeader label="Demand Score" field="demand_score" {...sdSF} />
                     <th style={thStyle}>Sources</th>
@@ -683,11 +708,14 @@ export default function ElectronicsResearch() {
                         <td style={tdStyle}>{r.gold_supplier_pct?.toFixed(1) || '—'}%</td>
                         <td style={tdStyle}>${r.fob_lowest_usd?.toFixed(2) || '—'}</td>
                         <td style={tdStyle}>${r.fob_highest_usd?.toFixed(2) || '—'}</td>
+                        <td style={tdStyle}>{r.fob_typical_usd ? `$${r.fob_typical_usd.toFixed(2)}` : '—'}</td>
                         <td style={tdStyle}>{r.typical_moq || '—'}</td>
                         <td style={{ ...tdStyle, color: '#4f8cff', fontWeight: '600' }}>{r.sellers || '—'}</td>
                         <td style={tdStyle}>{r.mfr_pct?.toFixed(0) || '—'}%</td>
                         <td style={tdStyle}>{r.price_low ? `₹${r.price_low.toLocaleString()}` : '—'}</td>
                         <td style={tdStyle}>{r.price_high ? `₹${r.price_high.toLocaleString()}` : '—'}</td>
+                        <td style={tdStyle}>{r.landed_cost_inr ? `₹${r.landed_cost_inr.toLocaleString()}` : '—'}</td>
+                        <td style={tdStyle}>{r.sell_price_inr ? `₹${r.sell_price_inr.toLocaleString()}` : '—'}</td>
                         <td style={{ ...tdStyle, color: mColor, fontWeight: '700', fontSize: '14px' }}>{m.toFixed(1)}%</td>
                         <td style={tdStyle}>{r.demand_score?.toFixed(1) || '—'}</td>
                         <td style={tdStyle}>{r.source_count || 0}</td>
@@ -730,6 +758,7 @@ export default function ElectronicsResearch() {
                       <SortHeader label="Obsol" field="score_obsolescence" {...scorSF} style={{ fontSize: '11px' }} />
                       <SortHeader label="Cap" field="score_capital" {...scorSF} style={{ fontSize: '11px' }} />
                       <SortHeader label="FTA" field="score_fta" {...scorSF} style={{ fontSize: '11px' }} />
+                      <th style={{ ...thStyle, minWidth: '180px' }}>Go/No-Go Notes</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -753,6 +782,7 @@ export default function ElectronicsResearch() {
                           <td style={{ ...tdStyle, color: cellColor(s.score_obsolescence, 10) }}>{s.score_obsolescence || 0}/10</td>
                           <td style={{ ...tdStyle, color: cellColor(s.score_capital, 5) }}>{s.score_capital || 0}/5</td>
                           <td style={{ ...tdStyle, color: cellColor(s.score_fta, 5) }}>{s.score_fta || 0}/5</td>
+                          <td style={{ ...tdStyle, fontSize: '11px', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={s.go_nogo_notes || ''}>{s.go_nogo_notes || '—'}</td>
                         </tr>
                       );
                     })}
@@ -791,7 +821,9 @@ export default function ElectronicsResearch() {
                     <SortHeader label="FOB $" field="fob_low" {...allSF} />
                     <SortHeader label="Sellers" field="total_sellers" {...allSF} />
                     <SortHeader label="Margin %" field="margin_pct" {...allSF} />
+                    <SortHeader label="Demand" field="demand_score" {...allSF} />
                     <SortHeader label="150pt" field="total_score" {...allSF} />
+                    <th style={thStyle}>Verdict</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -812,7 +844,9 @@ export default function ElectronicsResearch() {
                         <td style={tdStyle}>{c.fob_low ? `$${c.fob_low.toFixed(2)}` : '—'}</td>
                         <td style={tdStyle}>{c.total_sellers || '—'}</td>
                         <td style={{ ...tdStyle, color: mColor, fontWeight: '600' }}>{c.margin_pct ? `${c.margin_pct.toFixed(1)}%` : '—'}</td>
+                        <td style={tdStyle}>{c.demand_score ? c.demand_score.toFixed(1) : '—'}</td>
                         <td style={{ ...tdStyle, color: '#4f8cff', fontWeight: '600' }}>{c.total_score ? `${c.total_score}/150` : '—'}</td>
+                        <td style={tdStyle}>{c.verdict_score ? <Badge label={c.verdict_score} color={c.verdict_score === 'PURSUE' ? 'pass' : c.verdict_score === 'STRONG' ? 'blue' : c.verdict_score === 'MODERATE' ? 'maybe' : 'drop'} /> : c.final_verdict ? <Badge label={c.final_verdict} color={c.final_verdict === 'PURSUE' ? 'pass' : c.final_verdict === 'STRONG' ? 'blue' : c.final_verdict === 'MODERATE' ? 'maybe' : 'drop'} /> : '—'}</td>
                       </tr>
                     );
                   })}
