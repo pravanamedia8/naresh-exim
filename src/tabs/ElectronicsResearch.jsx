@@ -124,8 +124,13 @@ export default function ElectronicsResearch() {
   const [supply, setSupply] = useState([]);
   const [demand, setDemand] = useState([]);
   const [scoring, setScoring] = useState([]);
+  const [phase4, setPhase4] = useState([]);
+  const [volzaShipments, setVolzaShipments] = useState([]);
+  const [volzaBuyers, setVolzaBuyers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
+  const [volzaHS4Filter, setVolzaHS4Filter] = useState('');
+  const [volzaView, setVolzaView] = useState('overview');
   const PAGE_SIZE = 50;
 
   // Fetch all data
@@ -133,18 +138,24 @@ export default function ElectronicsResearch() {
     const fetchData = async () => {
       try {
         setLoading(true);
-        const [codesRes, regRes, supRes, demRes, scorRes] = await Promise.all([
+        const [codesRes, regRes, supRes, demRes, scorRes, p4Res, vsRes, vbRes] = await Promise.all([
           supabase.from('research_codes').select('*').order('drill_score', { ascending: false }),
           supabase.from('phase2b_regulatory').select('*'),
           supabase.from('phase2_alibaba_summary').select('*'),
           supabase.from('phase3_indiamart_summary').select('*'),
           supabase.from('phase5_scoring').select('*'),
+          supabase.from('phase4_volza').select('*'),
+          supabase.from('volza_shipments').select('*').limit(5000),
+          supabase.from('volza_buyers').select('*'),
         ]);
         setCodes(codesRes.data || []);
         setRegulatory(regRes.data || []);
         setSupply(supRes.data || []);
         setDemand(demRes.data || []);
         setScoring(scorRes.data || []);
+        setPhase4(p4Res.data || []);
+        setVolzaShipments(vsRes.data || []);
+        setVolzaBuyers(vbRes.data || []);
       } catch (err) { console.error('Fetch error:', err); }
       finally { setLoading(false); }
     };
@@ -155,6 +166,9 @@ export default function ElectronicsResearch() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'phase2_alibaba_summary' }, () => fetchData())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'phase3_indiamart_summary' }, () => fetchData())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'phase5_scoring' }, () => fetchData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'phase4_volza' }, () => fetchData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'volza_shipments' }, () => fetchData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'volza_buyers' }, () => fetchData())
       .subscribe();
     return () => sub.unsubscribe();
   }, []);
@@ -176,10 +190,11 @@ export default function ElectronicsResearch() {
     const p2bDone = regulatory.filter(r => r.completed_at).length;
     const p2Done = supply.length;
     const p3Done = demand.length;
+    const p4Done = phase4.filter(p => p.completed_at).length;
     const p5Done = scoring.length;
     const avgScore = scoring.length > 0 ? (scoring.reduce((a, s) => a + (s.total_score || 0), 0) / scoring.length).toFixed(1) : 'N/A';
-    return { byPhase, byQA, byModel, byVerdict, totalValM, completedVal, completed, p2bDone, p2Done, p3Done, p5Done, avgScore };
-  }, [codes, regulatory, supply, demand, scoring]);
+    return { byPhase, byQA, byModel, byVerdict, totalValM, completedVal, completed, p2bDone, p2Done, p3Done, p4Done, p5Done, avgScore };
+  }, [codes, regulatory, supply, demand, scoring, phase4]);
 
   // Merged data
   const mergedCodes = useMemo(() => {
@@ -187,7 +202,8 @@ export default function ElectronicsResearch() {
     const supMap = Object.fromEntries(supply.map(s => [s.hs4, s]));
     const demMap = Object.fromEntries(demand.map(d => [d.hs4, d]));
     const scorMap = Object.fromEntries(scoring.map(s => [s.hs4, s]));
-    return codes.map(c => ({ ...c, _reg: regMap[c.hs4], _sup: supMap[c.hs4], _dem: demMap[c.hs4], _scor: scorMap[c.hs4],
+    const p4Map = Object.fromEntries(phase4.map(p => [p.hs4, p]));
+    return codes.map(c => ({ ...c, _reg: regMap[c.hs4], _sup: supMap[c.hs4], _dem: demMap[c.hs4], _scor: scorMap[c.hs4], _p4: p4Map[c.hs4],
       total_duty_pct: regMap[c.hs4]?.total_duty_pct, regulatory_risk: regMap[c.hs4]?.regulatory_risk_score,
       total_suppliers: supMap[c.hs4]?.total_suppliers, fob_low: supMap[c.hs4]?.fob_lowest_usd, fob_typical: supMap[c.hs4]?.fob_typical_usd,
       total_sellers: demMap[c.hs4]?.total_sellers, margin_pct: demMap[c.hs4]?.gross_margin_pct,
@@ -240,6 +256,7 @@ export default function ElectronicsResearch() {
     { id: 'scoring', label: '⚡ 150-Point Scoring' },
     { id: 'regulatory', label: '🛡️ Regulatory Matrix' },
     { id: 'supply', label: '🏭 Supply vs Demand' },
+    { id: 'volza', label: `🚢 Volza Deep Dive (${volzaShipments.length})` },
     { id: 'allcodes', label: '📋 All 180 Codes' },
     { id: 'queue', label: '📑 Research Queue' },
   ];
@@ -276,7 +293,7 @@ export default function ElectronicsResearch() {
         <div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '16px', marginBottom: '24px' }}>
             <KPI label="Total HS4 Codes" value={codes.length} variant="blue" sub="Electronics group (Ch 84-91)" />
-            <KPI label="Completed (All 5 Phases)" value={completedCodes.length} variant="pass" sub={completedCodes.map(c => c.hs4).join(', ') || 'None yet'} />
+            <KPI label="Scored (P5 Done)" value={completedCodes.length} variant="pass" sub={completedCodes.map(c => c.hs4).join(', ') || 'None yet'} />
             <KPI label="Awaiting Research" value={codes.length - completedCodes.length} variant="maybe" sub="Phase 1 complete, pending P2b+" />
             <KPI label="QA Pass Rate" value={stats.byQA.PASS > 0 ? `${((stats.byQA.PASS / (stats.byQA.PASS + stats.byQA.FAILED)) * 100 || 0).toFixed(0)}%` : 'N/A'} variant="cyan" sub={`${stats.byQA.PASS}/${stats.byQA.PASS + stats.byQA.FAILED} passed`} />
             <KPI label="Total Trade Value" value={`$${(stats.completedVal / 1000).toFixed(1)}B`} variant="pass" sub={`${completedCodes.length} completed codes`} />
@@ -306,6 +323,7 @@ export default function ElectronicsResearch() {
                   { phase: 'P2 Alibaba', done: stats.p2Done, total: codes.length },
                   { phase: 'P3 IndiaMART', done: stats.p3Done, total: codes.length },
                   { phase: 'QA Gate', done: stats.byQA.PASS, total: codes.length },
+                  { phase: 'P4 Volza', done: stats.p4Done, total: stats.byQA.PASS || codes.length },
                   { phase: 'P5 Score', done: stats.p5Done, total: codes.length },
                 ]}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.1)" />
@@ -353,7 +371,7 @@ export default function ElectronicsResearch() {
                 { label: 'P2b: Regulatory', done: stats.p2bDone, total: codes.length, color: COLORS.blue },
                 { label: 'P2: Alibaba', done: stats.p2Done, total: codes.length, color: COLORS.blue },
                 { label: 'P3: IndiaMART', done: stats.p3Done, total: codes.length, color: COLORS.blue },
-                { label: 'P4: Volza Scrape', done: 0, total: 130, color: '#64748b' },
+                { label: 'P4: Volza Scrape', done: stats.p4Done, total: stats.byQA.PASS || 130, color: stats.p4Done > 0 ? COLORS.watch : '#64748b' },
                 { label: 'P5: 150-pt Score', done: stats.p5Done, total: codes.length, color: stats.p5Done > 0 ? COLORS.blue : '#64748b' },
               ].map((p, i) => (
                 <div key={i} style={{ flex: 1, minWidth: '140px' }}>
@@ -378,6 +396,7 @@ export default function ElectronicsResearch() {
             <KPI label="Phase 2b Done" value={stats.p2bDone} variant="cyan" sub="Regulatory verified" />
             <KPI label="Phase 2 Done" value={stats.p2Done} variant="pass" sub="Alibaba supply checked" />
             <KPI label="Phase 3 Done" value={stats.p3Done} variant="pass" sub="IndiaMART demand mapped" />
+            <KPI label="Phase 4 Done" value={stats.p4Done} variant="orange" sub="Volza deep scrape" />
             <KPI label="Phase 5 Done" value={stats.p5Done} variant="watch" sub="150-pt scored" />
             <KPI label="Killed" value={stats.byQA.FAILED} variant="drop" sub={stats.byQA.FAILED === 0 ? 'Zero hard kills so far' : `${stats.byQA.FAILED} failed QA`} />
           </div>
@@ -391,6 +410,7 @@ export default function ElectronicsResearch() {
                   { stage: 'P2 Supply', count: stats.p2Done },
                   { stage: 'P3 Demand', count: stats.p3Done },
                   { stage: 'QA Pass', count: stats.byQA.PASS },
+                  { stage: 'P4 Volza', count: stats.p4Done },
                   { stage: 'P5 Score', count: stats.p5Done },
                 ]}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.1)" />
@@ -413,6 +433,7 @@ export default function ElectronicsResearch() {
                       { name: 'P2: Alibaba Supply', done: stats.p2Done, total: codes.length },
                       { name: 'P3: IndiaMART Demand', done: stats.p3Done, total: codes.length },
                       { name: 'QA Gate', done: stats.byQA.PASS, total: codes.length },
+                      { name: 'P4: Volza Deep Scrape', done: stats.p4Done, total: stats.byQA.PASS || codes.length },
                       { name: 'P5: 150-pt Score', done: stats.p5Done, total: codes.length },
                     ].map((r, i) => (
                       <tr key={i}><td style={tdStyle}>{r.name}</td>
@@ -521,7 +542,9 @@ export default function ElectronicsResearch() {
                   <PhaseFlow phases={[
                     { label: 'P1', done: true }, { label: 'P2b', done: !!deepDive._reg?.completed_at },
                     { label: 'P2', done: !!deepDive._sup }, { label: 'P3', done: !!deepDive._dem },
-                    { label: 'QA', done: deepDive.qa_status === 'PASS' }, { label: 'P5', done: !!deepDive._scor },
+                    { label: 'QA', done: deepDive.qa_status === 'PASS' },
+                    { label: 'P4', done: !!deepDive._p4?.completed_at, current: deepDive.qa_status === 'PASS' && !deepDive._p4?.completed_at && !deepDive._scor },
+                    { label: 'P5', done: !!deepDive._scor },
                   ]} />
                 </div>
                 {deepDive._scor && <div style={{ fontSize: '28px', fontWeight: 800, color: COLORS.pass }}>{deepDive._scor.total_score}<span style={{ fontSize: '16px', color: '#94a3b8' }}>/150</span></div>}
@@ -871,6 +894,261 @@ export default function ElectronicsResearch() {
           </>)}
         </div>
       )}
+
+      {/* ==================== TAB: VOLZA DEEP DIVE ==================== */}
+      {activeTab === 'volza' && (() => {
+        const shipments = volzaShipments;
+        const buyers = volzaBuyers;
+        const p4Data = phase4;
+        const hs4List = [...new Set(shipments.map(s => s.hs4).filter(Boolean))].sort();
+        const filteredShipments = volzaHS4Filter ? shipments.filter(s => s.hs4 === volzaHS4Filter) : shipments;
+        const filteredBuyers = volzaHS4Filter ? buyers.filter(b => (b.hs_codes || '').includes(volzaHS4Filter)) : buyers;
+        const totalCIF = filteredShipments.reduce((a, s) => a + (Number(s.cif_value_usd) || 0), 0);
+        const uniqueConsignees = [...new Set(filteredShipments.map(s => s.consignee_name).filter(Boolean))].length;
+        const uniqueShippers = [...new Set(filteredShipments.map(s => s.shipper_name).filter(Boolean))].length;
+        const countries = {};
+        filteredShipments.forEach(s => { if (s.country_origin) countries[s.country_origin] = (countries[s.country_origin] || 0) + 1; });
+        const topCountries = Object.entries(countries).sort((a, b) => b[1] - a[1]).slice(0, 10);
+        const byHS4 = {};
+        shipments.forEach(s => { if (s.hs4) { if (!byHS4[s.hs4]) byHS4[s.hs4] = { count: 0, cif: 0 }; byHS4[s.hs4].count++; byHS4[s.hs4].cif += Number(s.cif_value_usd) || 0; } });
+        const hs4Chart = Object.entries(byHS4).sort((a, b) => b[1].count - a[1].count).slice(0, 20).map(([k, v]) => ({ hs4: k, shipments: v.count, cif: v.cif }));
+        const byMonth = {};
+        filteredShipments.forEach(s => { if (s.date) { const m = String(s.date).substring(0, 7); byMonth[m] = (byMonth[m] || 0) + 1; } });
+        const monthChart = Object.entries(byMonth).sort().map(([k, v]) => ({ month: k, count: v }));
+        const topConsignees = {};
+        filteredShipments.forEach(s => { if (s.consignee_name) { if (!topConsignees[s.consignee_name]) topConsignees[s.consignee_name] = { count: 0, cif: 0 }; topConsignees[s.consignee_name].count++; topConsignees[s.consignee_name].cif += Number(s.cif_value_usd) || 0; } });
+        const topCons = Object.entries(topConsignees).sort((a, b) => b[1].cif - a[1].cif).slice(0, 15);
+        const topShippers = {};
+        filteredShipments.forEach(s => { if (s.shipper_name) { if (!topShippers[s.shipper_name]) topShippers[s.shipper_name] = { count: 0, cif: 0 }; topShippers[s.shipper_name].count++; topShippers[s.shipper_name].cif += Number(s.cif_value_usd) || 0; } });
+        const topShip = Object.entries(topShippers).sort((a, b) => b[1].cif - a[1].cif).slice(0, 15);
+
+        return (
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
+              <h2 style={{ fontSize: '20px', color: '#e2e8f0', margin: 0 }}>🚢 Volza Deep Dive — Import Shipment Intelligence</h2>
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <select value={volzaHS4Filter} onChange={e => setVolzaHS4Filter(e.target.value)} style={{ padding: '8px 12px', background: '#1a2035', border: '1px solid rgba(148,163,184,0.1)', borderRadius: '8px', color: '#e2e8f0', fontSize: '13px' }}>
+                  <option value="">All HS4 Codes ({hs4List.length})</option>
+                  {hs4List.map(h => <option key={h} value={h}>HS4 {h} ({byHS4[h]?.count || 0} shipments)</option>)}
+                </select>
+                {['overview', 'shipments', 'buyers', 'phase4'].map(v => (
+                  <button key={v} onClick={() => setVolzaView(v)} style={{ padding: '6px 14px', borderRadius: '8px', fontSize: '12px', fontWeight: volzaView === v ? 600 : 400, background: volzaView === v ? RGB.blue : 'transparent', color: volzaView === v ? COLORS.blue : '#94a3b8', border: `1px solid ${volzaView === v ? COLORS.blue + '50' : 'rgba(148,163,184,0.08)'}`, cursor: 'pointer' }}>
+                    {v === 'overview' ? '📊 Overview' : v === 'shipments' ? '🚢 Shipments' : v === 'buyers' ? '🎯 Buyers' : '📋 Phase 4 Results'}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* KPI Row */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '16px', marginBottom: '24px' }}>
+              <KPI label="Total Shipments" value={filteredShipments.length.toLocaleString()} variant="blue" sub={hs4List.length + ' HS4 codes'} />
+              <KPI label="Total CIF Value" value={`$${(totalCIF / 1e6).toFixed(2)}M`} variant="pass" />
+              <KPI label="Unique Buyers" value={uniqueConsignees} variant="cyan" />
+              <KPI label="Unique Shippers" value={uniqueShippers} variant="orange" />
+              <KPI label="P4 Completed" value={p4Data.filter(p => p.completed_at).length} variant="watch" sub={`of ${p4Data.length} started`} />
+              <KPI label="Buyer Records" value={filteredBuyers.length} variant="pass" sub="Aggregated from shipments" />
+            </div>
+
+            {/* VOLZA OVERVIEW SUB-TAB */}
+            {volzaView === 'overview' && (<>
+              {shipments.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '60px', color: '#94a3b8' }}>
+                  No Volza shipment data yet. Data will appear here as Phase 4 Volza scraping progresses for QA-passed codes.
+                  <br /><br /><span style={{ fontSize: '13px' }}>Volza shipments are scraped using the KS4 v10 stealth scraper and imported via volza_importer.py</span>
+                </div>
+              ) : (<>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '24px' }}>
+                  <Card title="Shipments by HS4 Code" emoji="📊">
+                    <ResponsiveContainer width="100%" height={300}>
+                      <BarChart data={hs4Chart}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.1)" />
+                        <XAxis dataKey="hs4" stroke="#94a3b8" fontSize={11} />
+                        <YAxis stroke="#94a3b8" />
+                        <Tooltip contentStyle={tooltipStyle} />
+                        <Bar dataKey="shipments" fill={COLORS.blue} radius={[4, 4, 0, 0]} name="Shipments" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </Card>
+                  <Card title="Country of Origin" emoji="🌍">
+                    <ResponsiveContainer width="100%" height={300}>
+                      <PieChart>
+                        <Pie data={topCountries.map(([k, v]) => ({ name: k, value: v }))} cx="50%" cy="50%" innerRadius={50} outerRadius={110} paddingAngle={2} dataKey="value" label={({ name, value }) => `${name}: ${value}`}>
+                          {topCountries.map((_, i) => <Cell key={i} fill={[COLORS.blue, COLORS.cyan, COLORS.pass, COLORS.maybe, COLORS.watch, COLORS.orange, COLORS.drop, '#94a3b8', '#64748b', '#475569'][i % 10]} />)}
+                        </Pie>
+                        <Tooltip contentStyle={tooltipStyle} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </Card>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '24px' }}>
+                  <Card title="Monthly Shipment Trend" emoji="📈">
+                    <ResponsiveContainer width="100%" height={250}>
+                      <BarChart data={monthChart}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.1)" />
+                        <XAxis dataKey="month" stroke="#94a3b8" fontSize={10} />
+                        <YAxis stroke="#94a3b8" />
+                        <Tooltip contentStyle={tooltipStyle} />
+                        <Bar dataKey="count" fill={COLORS.cyan} radius={[4, 4, 0, 0]} name="Shipments" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </Card>
+                  <Card title="CIF Value by HS4" emoji="💰">
+                    <ResponsiveContainer width="100%" height={250}>
+                      <BarChart data={hs4Chart.map(h => ({ ...h, cifK: h.cif / 1000 }))}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.1)" />
+                        <XAxis dataKey="hs4" stroke="#94a3b8" fontSize={11} />
+                        <YAxis stroke="#94a3b8" />
+                        <Tooltip contentStyle={tooltipStyle} formatter={v => `$${Number(v).toFixed(1)}K`} />
+                        <Bar dataKey="cifK" fill={COLORS.pass} radius={[4, 4, 0, 0]} name="CIF $K" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </Card>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+                  <Card title="Top 15 Buyers (by CIF)" emoji="🎯">
+                    <div style={{ maxHeight: '350px', overflowY: 'auto' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                        <thead><tr><th style={thStyle}>#</th><th style={thStyle}>Company</th><th style={thStyle}>Shipments</th><th style={thStyle}>Total CIF</th></tr></thead>
+                        <tbody>{topCons.map(([name, d], i) => (
+                          <tr key={name}><td style={tdStyle}>{i + 1}</td><td style={{ ...tdStyle, fontWeight: 600, color: COLORS.blue, maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={name}>{name}</td>
+                            <td style={tdStyle}>{d.count}</td><td style={{ ...tdStyle, fontWeight: 600 }}>${(d.cif / 1000).toFixed(1)}K</td></tr>
+                        ))}</tbody>
+                      </table>
+                    </div>
+                  </Card>
+                  <Card title="Top 15 Shippers (by CIF)" emoji="🏭">
+                    <div style={{ maxHeight: '350px', overflowY: 'auto' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                        <thead><tr><th style={thStyle}>#</th><th style={thStyle}>Company</th><th style={thStyle}>Shipments</th><th style={thStyle}>Total CIF</th></tr></thead>
+                        <tbody>{topShip.map(([name, d], i) => (
+                          <tr key={name}><td style={tdStyle}>{i + 1}</td><td style={{ ...tdStyle, fontWeight: 600, color: COLORS.orange, maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={name}>{name}</td>
+                            <td style={tdStyle}>{d.count}</td><td style={{ ...tdStyle, fontWeight: 600 }}>${(d.cif / 1000).toFixed(1)}K</td></tr>
+                        ))}</tbody>
+                      </table>
+                    </div>
+                  </Card>
+                </div>
+              </>)}
+            </>)}
+
+            {/* VOLZA SHIPMENTS SUB-TAB */}
+            {volzaView === 'shipments' && (
+              <div>
+                {filteredShipments.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '60px', color: '#94a3b8' }}>No shipment records{volzaHS4Filter ? ` for HS4 ${volzaHS4Filter}` : ''}. Data populates as Volza scraping progresses.</div>
+                ) : (
+                  <div style={{ border: '1px solid rgba(148,163,184,0.08)', borderRadius: '12px', overflow: 'hidden', maxHeight: '700px', overflowY: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
+                      <thead><tr>
+                        <th style={thStyle}>Date</th><th style={thStyle}>HS4</th><th style={thStyle}>HS Code</th><th style={thStyle}>Product</th>
+                        <th style={thStyle}>Consignee</th><th style={thStyle}>Shipper</th><th style={thStyle}>CIF $</th><th style={thStyle}>Unit Rate $</th>
+                        <th style={thStyle}>Qty</th><th style={thStyle}>Origin</th><th style={thStyle}>City</th><th style={thStyle}>Duty %</th>
+                      </tr></thead>
+                      <tbody>{filteredShipments.slice(0, 200).map((s, i) => (
+                        <tr key={i}>
+                          <td style={tdStyle}>{s.date ? String(s.date).substring(0, 10) : '—'}</td>
+                          <td style={{ ...tdStyle, color: COLORS.blue, fontWeight: 600 }}>{s.hs4}</td>
+                          <td style={tdStyle}>{s.hs_code}</td>
+                          <td style={{ ...tdStyle, maxWidth: '180px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={s.product_desc}>{s.product_desc}</td>
+                          <td style={{ ...tdStyle, maxWidth: '150px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: COLORS.cyan }} title={s.consignee_name}>{s.consignee_name}</td>
+                          <td style={{ ...tdStyle, maxWidth: '150px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: COLORS.orange }} title={s.shipper_name}>{s.shipper_name}</td>
+                          <td style={{ ...tdStyle, fontWeight: 600 }}>{s.cif_value_usd ? `$${Number(s.cif_value_usd).toLocaleString()}` : '—'}</td>
+                          <td style={tdStyle}>{s.unit_rate_usd ? `$${Number(s.unit_rate_usd).toFixed(2)}` : '—'}</td>
+                          <td style={tdStyle}>{s.std_qty ? Number(s.std_qty).toLocaleString() : '—'} {s.std_unit || ''}</td>
+                          <td style={tdStyle}>{s.country_origin || '—'}</td>
+                          <td style={tdStyle}>{s.consignee_city || '—'}</td>
+                          <td style={tdStyle}>{s.tax_pct ? `${Number(s.tax_pct).toFixed(1)}%` : '—'}</td>
+                        </tr>
+                      ))}</tbody>
+                    </table>
+                    {filteredShipments.length > 200 && <div style={{ padding: '12px', textAlign: 'center', color: '#64748b', fontSize: '12px' }}>Showing 200 of {filteredShipments.length.toLocaleString()} records. Use HS4 filter to narrow down.</div>}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* VOLZA BUYERS SUB-TAB */}
+            {volzaView === 'buyers' && (
+              <div>
+                {filteredBuyers.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '60px', color: '#94a3b8' }}>No buyer records{volzaHS4Filter ? ` for HS4 ${volzaHS4Filter}` : ''}. Buyer data is aggregated from shipment records.</div>
+                ) : (
+                  <div style={{ border: '1px solid rgba(148,163,184,0.08)', borderRadius: '12px', overflow: 'hidden', maxHeight: '700px', overflowY: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                      <thead><tr>
+                        <th style={thStyle}>Company</th><th style={thStyle}>IEC</th><th style={thStyle}>Shipments</th><th style={thStyle}>Total CIF</th>
+                        <th style={thStyle}>Avg Rate</th><th style={thStyle}>HS Codes</th><th style={thStyle}>City</th><th style={thStyle}>State</th>
+                        <th style={thStyle}>China %</th><th style={thStyle}>Classification</th><th style={thStyle}>Shippers</th>
+                      </tr></thead>
+                      <tbody>{filteredBuyers.sort((a, b) => (b.total_cif_usd || 0) - (a.total_cif_usd || 0)).slice(0, 200).map((b, i) => (
+                        <tr key={i}>
+                          <td style={{ ...tdStyle, fontWeight: 600, color: COLORS.blue, maxWidth: '180px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={b.company_name}>{b.company_name}</td>
+                          <td style={tdStyle}>{b.iec || '—'}</td>
+                          <td style={{ ...tdStyle, fontWeight: 600 }}>{b.shipment_count || 0}</td>
+                          <td style={{ ...tdStyle, fontWeight: 600, color: COLORS.pass }}>{b.total_cif_usd ? `$${(Number(b.total_cif_usd) / 1000).toFixed(1)}K` : '—'}</td>
+                          <td style={tdStyle}>{b.avg_unit_rate ? `$${Number(b.avg_unit_rate).toFixed(2)}` : '—'}</td>
+                          <td style={{ ...tdStyle, maxWidth: '100px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={b.hs_codes}>{b.hs_codes || '—'}</td>
+                          <td style={tdStyle}>{b.city || '—'}</td>
+                          <td style={tdStyle}>{b.state || '—'}</td>
+                          <td style={{ ...tdStyle, color: (b.china_pct || 0) > 50 ? COLORS.drop : (b.china_pct || 0) > 20 ? COLORS.maybe : COLORS.pass }}>{b.china_pct ? `${Number(b.china_pct).toFixed(0)}%` : '—'}</td>
+                          <td style={tdStyle}><Badge label={b.classification || 'UNKNOWN'} /></td>
+                          <td style={tdStyle}>{b.shipper_count || 0}</td>
+                        </tr>
+                      ))}</tbody>
+                    </table>
+                    {filteredBuyers.length > 200 && <div style={{ padding: '12px', textAlign: 'center', color: '#64748b', fontSize: '12px' }}>Showing 200 of {filteredBuyers.length} buyer records.</div>}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* PHASE 4 RESULTS SUB-TAB */}
+            {volzaView === 'phase4' && (
+              <div>
+                {p4Data.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '60px', color: '#94a3b8' }}>
+                    No Phase 4 validation results yet. Phase 4 runs after QA Gate passes — it scrapes Volza shipment data and validates buyer distribution, CIF ranges, and sourcing patterns.
+                  </div>
+                ) : (
+                  <div style={{ border: '1px solid rgba(148,163,184,0.08)', borderRadius: '12px', overflow: 'hidden' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                      <thead><tr>
+                        <th style={thStyle}>HS4</th><th style={thStyle}>Scrape Date</th><th style={thStyle}>Shipments</th><th style={thStyle}>Pages</th>
+                        <th style={thStyle}>Buyers</th><th style={thStyle}>HHI</th><th style={thStyle}>Median CIF</th><th style={thStyle}>Avg CIF</th>
+                        <th style={thStyle}>Shippers</th><th style={thStyle}>China %</th><th style={thStyle}>Unit Rate</th><th style={thStyle}>Kill?</th>
+                      </tr></thead>
+                      <tbody>{p4Data.sort((a, b) => (b.total_shipments || 0) - (a.total_shipments || 0)).map(p => (
+                        <tr key={p.hs4}>
+                          <td style={{ ...tdStyle, fontWeight: 700, color: COLORS.blue }}>{p.hs4}</td>
+                          <td style={tdStyle}>{p.scrape_date || '—'}</td>
+                          <td style={{ ...tdStyle, fontWeight: 600 }}>{(p.total_shipments || 0).toLocaleString()}</td>
+                          <td style={tdStyle}>{p.total_pages || '—'}</td>
+                          <td style={{ ...tdStyle, color: (p.unique_buyers || 0) > 20 ? COLORS.pass : COLORS.maybe }}>{p.unique_buyers || 0}</td>
+                          <td style={{ ...tdStyle, color: (p.buyer_hhi || 0) < 2500 ? COLORS.pass : COLORS.drop }}>{p.buyer_hhi?.toFixed(0) || '—'}</td>
+                          <td style={tdStyle}>{p.median_cif_usd ? `$${p.median_cif_usd.toFixed(0)}` : '—'}</td>
+                          <td style={tdStyle}>{p.avg_cif_usd ? `$${p.avg_cif_usd.toFixed(0)}` : '—'}</td>
+                          <td style={tdStyle}>{p.unique_shippers || 0}</td>
+                          <td style={{ ...tdStyle, color: (p.china_sourcing_pct || 0) > 40 ? COLORS.pass : COLORS.maybe }}>{p.china_sourcing_pct ? `${p.china_sourcing_pct.toFixed(0)}%` : '—'}</td>
+                          <td style={tdStyle}>{p.volza_avg_unit_rate ? `$${p.volza_avg_unit_rate.toFixed(2)}` : '—'}</td>
+                          <td style={tdStyle}>{p.kill_signal ? <span style={{ color: COLORS.drop }}>KILL: {p.kill_reason}</span> : <span style={{ color: COLORS.pass }}>PASS</span>}</td>
+                        </tr>
+                      ))}</tbody>
+                    </table>
+                  </div>
+                )}
+                <Card title="Phase 4 Validation Thresholds" emoji="📋" style={{ marginTop: '20px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
+                    <Metric label="Buyer HHI" value="< 2,500" color={COLORS.pass} sub="Distributed market = GOOD" />
+                    <Metric label="Unique Buyers" value="> 20" color={COLORS.pass} sub="Sufficient buyer pool" />
+                    <Metric label="Median CIF" value="$5K-$100K" color={COLORS.pass} sub="Trader-friendly range" />
+                    <Metric label="China Sourcing" value="> 40%" color={COLORS.pass} sub="Alibaba supply validated" />
+                  </div>
+                </Card>
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* ==================== TAB: ALL 180 CODES ==================== */}
       {activeTab === 'allcodes' && (
