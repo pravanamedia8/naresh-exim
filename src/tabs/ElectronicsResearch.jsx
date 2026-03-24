@@ -211,7 +211,8 @@ export default function ElectronicsResearch() {
     }));
   }, [codes, regulatory, supply, demand, scoring]);
 
-  const completedCodes = useMemo(() => mergedCodes.filter(c => c._scor), [mergedCodes]);
+  const completedCodes = useMemo(() => mergedCodes.filter(c => c.qa_status === 'PASS' || c._scor), [mergedCodes]);
+  const scoredCodes = useMemo(() => mergedCodes.filter(c => c._scor), [mergedCodes]);
 
   // Deep dive data
   const deepDive = useMemo(() => {
@@ -293,7 +294,7 @@ export default function ElectronicsResearch() {
         <div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '16px', marginBottom: '24px' }}>
             <KPI label="Total HS4 Codes" value={codes.length} variant="blue" sub="Electronics group (Ch 84-91)" />
-            <KPI label="Scored (P5 Done)" value={completedCodes.length} variant="pass" sub={completedCodes.map(c => c.hs4).join(', ') || 'None yet'} />
+            <KPI label="QA Passed" value={completedCodes.length} variant="pass" sub={completedCodes.map(c => c.hs4).join(', ') || 'None yet'} />
             <KPI label="Awaiting Research" value={codes.length - completedCodes.length} variant="maybe" sub="Phase 1 complete, pending P2b+" />
             <KPI label="QA Pass Rate" value={stats.byQA.PASS > 0 ? `${((stats.byQA.PASS / (stats.byQA.PASS + stats.byQA.FAILED)) * 100 || 0).toFixed(0)}%` : 'N/A'} variant="cyan" sub={`${stats.byQA.PASS}/${stats.byQA.PASS + stats.byQA.FAILED} passed`} />
             <KPI label="Total Trade Value" value={`$${(stats.completedVal / 1000).toFixed(1)}B`} variant="pass" sub={`${completedCodes.length} completed codes`} />
@@ -351,7 +352,7 @@ export default function ElectronicsResearch() {
               </Card>
               <Card title="150-Point Score Comparison" emoji="🎯">
                 <ResponsiveContainer width="100%" height={280}>
-                  <BarChart data={completedCodes.map(c => ({ name: `${c.hs4}`, score: c._scor?.total_score || 0 }))}>
+                  <BarChart data={scoredCodes.length > 0 ? scoredCodes.map(c => ({ name: `${c.hs4}`, score: c._scor?.total_score || 0 })) : completedCodes.map(c => ({ name: `${c.hs4}`, score: c._scor?.total_score || 0 }))}>
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.1)" />
                     <XAxis dataKey="name" stroke="#94a3b8" />
                     <YAxis domain={[0, 150]} stroke="#94a3b8" />
@@ -472,10 +473,10 @@ export default function ElectronicsResearch() {
             <div style={{ textAlign: 'center', padding: '60px', color: '#94a3b8' }}>No codes have completed all 5 phases yet. Research data will appear here as codes pass through the pipeline.</div>
           ) : (<>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '16px', marginBottom: '24px' }}>
-              <KPI label={`All ${completedCodes.length} Verdicts`} value={completedCodes.length > 0 ? completedCodes[0]._scor?.verdict || 'N/A' : 'N/A'} variant="pass" sub={`Score range: ${Math.min(...completedCodes.map(c => c._scor?.total_score || 0))}-${Math.max(...completedCodes.map(c => c._scor?.total_score || 0))}/150`} />
-              <KPI label="Trading Model" value={(() => { const models = [...new Set(completedCodes.map(c => c.trading_model).filter(Boolean))]; return models.length === 1 ? models[0] : 'MIXED'; })()} variant="orange" />
+              <KPI label="QA Status" value={`${completedCodes.length} PASSED`} variant="pass" sub={scoredCodes.length > 0 ? `${scoredCodes.length} scored (P5), score range: ${Math.min(...scoredCodes.map(c => c._scor?.total_score || 0))}-${Math.max(...scoredCodes.map(c => c._scor?.total_score || 0))}/150` : 'Awaiting Phase 5 scoring'} />
+              <KPI label="Trading Model" value={(() => { const models = [...new Set(completedCodes.map(c => c.trading_model).filter(Boolean))]; return models.length === 1 ? models[0] : models.length > 1 ? 'MIXED' : 'N/A'; })()} variant="orange" sub={completedCodes.map(c => c.trading_model).filter(Boolean).join(', ') || 'Not yet assigned'} />
               <KPI label="Combined Market" value={`$${(completedCodes.reduce((a, c) => a + (c.val_m || 0), 0) / 1000).toFixed(1)}B`} variant="cyan" sub="Annual India imports" />
-              <KPI label="QA Completeness" value="100%" variant="pass" sub="All fields verified" />
+              <KPI label="QA Completeness" value={`${Math.round(completedCodes.reduce((a, c) => a + (c.qa_completeness_score || 0), 0) / completedCodes.length)}%`} variant="pass" sub="Avg completeness score" />
             </div>
             <div style={{ border: '1px solid rgba(148,163,184,0.08)', borderRadius: '12px', overflow: 'hidden', maxHeight: '500px', overflowY: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
@@ -484,15 +485,15 @@ export default function ElectronicsResearch() {
                   <th style={thStyle}>Verdict</th><th style={thStyle}>Model</th><th style={thStyle}>Margin %</th><th style={thStyle}>Suppliers</th>
                   <th style={thStyle}>Sellers</th><th style={thStyle}>Total Duty %</th><th style={thStyle}>Reg Risk</th><th style={thStyle}>Shortage</th>
                 </tr></thead>
-                <tbody>{completedCodes.sort((a, b) => (b._scor?.total_score || 0) - (a._scor?.total_score || 0)).map(c => {
+                <tbody>{[...completedCodes].sort((a, b) => (b._scor?.total_score || b.val_m || 0) - (a._scor?.total_score || a.val_m || 0)).map(c => {
                   const m = c.margin_pct || c._dem?.gross_margin_pct || 0;
                   return (
                     <tr key={c.hs4} style={{ cursor: 'pointer' }} onClick={() => { setDeepDiveCode(c.hs4); setActiveTab('deepdive'); }}>
                       <td style={{ ...tdStyle, fontWeight: 700, color: COLORS.blue }}>{c.hs4}</td>
                       <td style={tdStyle}>{c.commodity}</td>
                       <td style={{ ...tdStyle, fontWeight: 600 }}>${(c.val_m || 0).toLocaleString()}</td>
-                      <td style={tdStyle}><span style={{ fontWeight: 700, color: COLORS.pass }}>{c._scor?.total_score || 0}</span>/150</td>
-                      <td style={tdStyle}><Badge label={c._scor?.verdict || 'N/A'} /></td>
+                      <td style={tdStyle}>{c._scor ? <><span style={{ fontWeight: 700, color: COLORS.pass }}>{c._scor.total_score}</span>/150</> : <span style={{ color: '#64748b' }}>Awaiting P5</span>}</td>
+                      <td style={tdStyle}><Badge label={c._scor?.verdict || c.qa_status || 'N/A'} /></td>
                       <td style={tdStyle}><Badge label={c.trading_model || 'N/A'} /></td>
                       <td style={{ ...tdStyle, color: m > 20 ? COLORS.pass : m > 10 ? COLORS.maybe : COLORS.drop, fontWeight: 600 }}>{m.toFixed(1)}%</td>
                       <td style={tdStyle}>{c.total_suppliers || c._sup?.total_suppliers || 0}</td>
@@ -517,7 +518,7 @@ export default function ElectronicsResearch() {
             {completedCodes.length > 0 ? (
               <select value={deepDive?.hs4 || ''} onChange={e => setDeepDiveCode(e.target.value)} style={{ background: '#1a2035', border: '1px solid rgba(96,165,250,0.3)', color: COLORS.blue, padding: '8px 16px', borderRadius: '8px', fontSize: '14px', fontWeight: 600, cursor: 'pointer', outline: 'none', minWidth: '320px' }}>
                 {completedCodes.map(c => (
-                  <option key={c.hs4} value={c.hs4}>HS4 {c.hs4} — {c.commodity} ({c._scor?.total_score || 0}/150)</option>
+                  <option key={c.hs4} value={c.hs4}>HS4 {c.hs4} — {c.commodity} ({c._scor ? `${c._scor.total_score}/150` : `QA: ${c.qa_status || 'PASS'}`})</option>
                 ))}
               </select>
             ) : (
