@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { supabase } from '../supabaseClient';
-import { BarChart, Bar, PieChart, Pie, Cell, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { BarChart, Bar, PieChart, Pie, Cell, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ZAxis } from 'recharts';
 
 const COLORS = { pass: '#34d399', maybe: '#fbbf24', watch: '#a78bfa', drop: '#f87171', blue: '#60a5fa', cyan: '#22d3ee', orange: '#fb923c' };
 const RGB = { pass: 'rgba(52,211,153,0.12)', maybe: 'rgba(251,191,36,0.12)', watch: 'rgba(167,139,250,0.12)', drop: 'rgba(248,113,113,0.12)', blue: 'rgba(96,165,250,0.12)', cyan: 'rgba(34,211,238,0.12)', orange: 'rgba(251,146,60,0.12)' };
@@ -117,7 +117,7 @@ const tooltipStyle = { background: '#111827', border: '1px solid rgba(148,163,18
 
 // ===== MAIN COMPONENT =====
 export default function ElectronicsResearch() {
-  const [activeTab, setActiveTab] = useState('overview');
+  const [activeTab, setActiveTab] = useState('analytics');
   const [deepDiveCode, setDeepDiveCode] = useState(null);
   const [codes, setCodes] = useState([]);
   const [regulatory, setRegulatory] = useState([]);
@@ -131,6 +131,8 @@ export default function ElectronicsResearch() {
   const [page, setPage] = useState(1);
   const [volzaHS4Filter, setVolzaHS4Filter] = useState('');
   const [volzaView, setVolzaView] = useState('overview');
+  const [fullAnalysis, setFullAnalysis] = useState([]);
+  const [analyticsFilters, setAnalyticsFilters] = useState({ marginTier: '', marketSize: '', regRisk: '', tradingModel: '', bisReq: '', certCount: '' });
   const PAGE_SIZE = 50;
 
   // Fetch all data
@@ -138,7 +140,7 @@ export default function ElectronicsResearch() {
     const fetchData = async () => {
       try {
         setLoading(true);
-        const [codesRes, regRes, supRes, demRes, scorRes, p4Res, vsRes, vbRes] = await Promise.all([
+        const [codesRes, regRes, supRes, demRes, scorRes, p4Res, vsRes, vbRes, faRes] = await Promise.all([
           supabase.from('research_codes').select('*').order('drill_score', { ascending: false }),
           supabase.from('phase2b_regulatory').select('*'),
           supabase.from('phase2_alibaba_summary').select('*'),
@@ -147,6 +149,7 @@ export default function ElectronicsResearch() {
           supabase.from('phase4_volza').select('*'),
           supabase.from('volza_shipments').select('*').limit(5000),
           supabase.from('volza_buyers').select('*'),
+          supabase.from('electronics_full_analysis').select('*').order('opportunity_score', { ascending: false }),
         ]);
         setCodes(codesRes.data || []);
         setRegulatory(regRes.data || []);
@@ -156,6 +159,7 @@ export default function ElectronicsResearch() {
         setPhase4(p4Res.data || []);
         setVolzaShipments(vsRes.data || []);
         setVolzaBuyers(vbRes.data || []);
+        setFullAnalysis(faRes.data || []);
       } catch (err) { console.error('Fetch error:', err); }
       finally { setLoading(false); }
     };
@@ -249,7 +253,60 @@ export default function ElectronicsResearch() {
   const scorSF = useSortFilter(scoring, 'total_score', 'desc');
 
   // Tab definitions matching HTML dashboard
+  // --- Analytics computed data ---
+  const analyticsSF = useSortFilter(fullAnalysis, 'opportunity_score', 'desc');
+  const analyticsFiltered = useMemo(() => {
+    let d = analyticsSF.sorted;
+    const f = analyticsFilters;
+    if (f.marginTier) d = d.filter(r => r.margin_tier === f.marginTier);
+    if (f.marketSize) d = d.filter(r => r.market_size_tier === f.marketSize);
+    if (f.regRisk) d = d.filter(r => r.regulatory_risk_score === f.regRisk);
+    if (f.tradingModel) d = d.filter(r => r.trading_model === f.tradingModel);
+    if (f.bisReq === '1') d = d.filter(r => r.bis_required === 1);
+    if (f.bisReq === '0') d = d.filter(r => r.bis_required !== 1);
+    if (f.certCount) d = d.filter(r => r.cert_count === parseInt(f.certCount));
+    return d;
+  }, [analyticsSF.sorted, analyticsFilters]);
+
+  const analyticsStats = useMemo(() => {
+    if (!fullAnalysis.length) return {};
+    const withMargin = fullAnalysis.filter(r => r.gross_margin_pct != null);
+    const positive = withMargin.filter(r => r.gross_margin_pct > 0);
+    const excellent = withMargin.filter(r => r.gross_margin_pct > 50);
+    const good = withMargin.filter(r => r.gross_margin_pct > 30 && r.gross_margin_pct <= 50);
+    const moderate = withMargin.filter(r => r.gross_margin_pct > 15 && r.gross_margin_pct <= 30);
+    const thin = withMargin.filter(r => r.gross_margin_pct > 0 && r.gross_margin_pct <= 15);
+    const negative = withMargin.filter(r => r.gross_margin_pct <= 0);
+    const totalOppScore = fullAnalysis.reduce((a, r) => a + (r.opportunity_score || 0), 0);
+    const avgMargin = positive.length > 0 ? positive.reduce((a, r) => a + r.gross_margin_pct, 0) / positive.length : 0;
+    const totalValM = fullAnalysis.reduce((a, r) => a + (r.val_m || 0), 0);
+    const noBIS = fullAnalysis.filter(r => !r.bis_required);
+    const noWPC = fullAnalysis.filter(r => !r.wpc_required);
+    const noTEC = fullAnalysis.filter(r => !r.tec_required);
+    const noCert = fullAnalysis.filter(r => r.cert_count === 0);
+    const marginBuckets = [
+      { name: '50%+', count: excellent.length, color: '#34d399' },
+      { name: '30-50%', count: good.length, color: '#22d3ee' },
+      { name: '15-30%', count: moderate.length, color: '#60a5fa' },
+      { name: '0-15%', count: thin.length, color: '#fbbf24' },
+      { name: 'Negative', count: negative.length, color: '#f87171' },
+    ];
+    const modelDist = {};
+    fullAnalysis.forEach(r => { const m = r.trading_model || 'UNASSIGNED'; modelDist[m] = (modelDist[m] || 0) + 1; });
+    const marketBuckets = {};
+    fullAnalysis.forEach(r => { const t = r.market_size_tier || 'UNKNOWN'; marketBuckets[t] = (marketBuckets[t] || 0) + 1; });
+    // Top 30 opportunity scatter data
+    const scatterData = fullAnalysis.filter(r => r.gross_margin_pct != null && r.val_m > 0).map(r => ({
+      x: r.val_m, y: r.gross_margin_pct || 0, z: r.opportunity_score || 0, hs4: r.hs4, name: r.commodity, model: r.trading_model
+    }));
+    return { withMargin, positive, excellent, good, moderate, thin, negative, totalOppScore, avgMargin, totalValM, noBIS, noWPC, noTEC, noCert, marginBuckets, modelDist, marketBuckets, scatterData };
+  }, [fullAnalysis]);
+
+  const [analyticsPage, setAnalyticsPage] = useState(1);
+  const ANALYTICS_PAGE_SIZE = 30;
+
   const tabs = [
+    { id: 'analytics', label: '🔍 Analytics Deep Dive' },
     { id: 'overview', label: '📊 Executive Overview' },
     { id: 'pipeline', label: '🚀 Pipeline Funnel' },
     { id: 'completed', label: `✅ Completed (${completedCodes.length})` },
@@ -288,6 +345,254 @@ export default function ElectronicsResearch() {
           }}>{t.label}</button>
         ))}
       </div>
+
+      {/* ==================== TAB: ANALYTICS DEEP DIVE ==================== */}
+      {activeTab === 'analytics' && fullAnalysis.length > 0 && (
+        <div>
+          {/* Data Coverage Notice */}
+          <div style={{ background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.2)', borderRadius: '10px', padding: '14px 18px', marginBottom: '20px', fontSize: '13px', color: '#fbbf24' }}>
+            <strong>Data Coverage Note:</strong> Each HS4 code contains dozens to hundreds of HS8 sub-products. Research covered the <strong>top 3 keywords by trade value</strong> per code — representing the highest-value segment. Actual product variety within each HS4 is much wider. Margins and prices shown are for the researched segment only. Phase 4 (Volza) will provide shipment-level granularity.
+          </div>
+
+          {/* KPI Row */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(155px, 1fr))', gap: '12px', marginBottom: '20px' }}>
+            <KPI label="Total Codes" value={fullAnalysis.length} variant="blue" sub={`$${(analyticsStats.totalValM / 1000).toFixed(1)}B total trade`} />
+            <KPI label="Positive Margin" value={analyticsStats.positive?.length || 0} variant="pass" sub={`Avg ${analyticsStats.avgMargin?.toFixed(1)}% margin`} />
+            <KPI label="50%+ Margin" value={analyticsStats.excellent?.length || 0} variant="cyan" sub="Excellent tier" />
+            <KPI label="Negative Margin" value={analyticsStats.negative?.length || 0} variant="drop" sub="SPOT/BROKER model" />
+            <KPI label="No Certifications" value={analyticsStats.noCert?.length || 0} variant="pass" sub="Easy entry" />
+            <KPI label="BIS Required" value={fullAnalysis.filter(r => r.bis_required).length} variant="maybe" sub={`${fullAnalysis.filter(r => !r.bis_required).length} without BIS`} />
+            <KPI label="Opp Score Total" value={Math.round(analyticsStats.totalOppScore || 0).toLocaleString()} variant="orange" sub="Margin × Market $M" />
+          </div>
+
+          {/* Charts Row */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '16px', marginBottom: '20px' }}>
+            <Card title="Margin Distribution" emoji="📊">
+              <ResponsiveContainer width="100%" height={220}>
+                <BarChart data={analyticsStats.marginBuckets || []}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.1)" />
+                  <XAxis dataKey="name" stroke="#94a3b8" fontSize={11} />
+                  <YAxis stroke="#94a3b8" />
+                  <Tooltip contentStyle={{ background: '#111827', border: '1px solid rgba(148,163,184,0.2)', borderRadius: '8px', color: '#e2e8f0' }} />
+                  <Bar dataKey="count" name="Codes" radius={[4, 4, 0, 0]}>
+                    {(analyticsStats.marginBuckets || []).map((e, i) => <Cell key={i} fill={e.color} />)}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </Card>
+
+            <Card title="Trading Model Split" emoji="🏷️">
+              <ResponsiveContainer width="100%" height={220}>
+                <PieChart>
+                  <Pie data={Object.entries(analyticsStats.modelDist || {}).map(([k, v]) => ({ name: k, value: v }))} cx="50%" cy="50%" innerRadius={40} outerRadius={80} paddingAngle={3} dataKey="value" label={({ name, value }) => `${name}: ${value}`}>
+                    {Object.keys(analyticsStats.modelDist || {}).map((k, i) => <Cell key={i} fill={MODEL_COLORS[k] || '#94a3b8'} />)}
+                  </Pie>
+                  <Tooltip contentStyle={{ background: '#111827', border: '1px solid rgba(148,163,184,0.2)', borderRadius: '8px', color: '#e2e8f0' }} />
+                </PieChart>
+              </ResponsiveContainer>
+            </Card>
+
+            <Card title="Opportunity Matrix" emoji="🎯" style={{}}>
+              <div style={{ fontSize: '10px', color: '#64748b', marginBottom: '4px' }}>X: Trade Value ($M) | Y: Margin % | Size: Opportunity Score</div>
+              <ResponsiveContainer width="100%" height={200}>
+                <ScatterChart>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.1)" />
+                  <XAxis dataKey="x" name="Trade $M" stroke="#94a3b8" fontSize={10} />
+                  <YAxis dataKey="y" name="Margin %" stroke="#94a3b8" fontSize={10} />
+                  <ZAxis dataKey="z" range={[20, 400]} name="Opportunity" />
+                  <Tooltip contentStyle={{ background: '#111827', border: '1px solid rgba(148,163,184,0.2)', borderRadius: '8px', color: '#e2e8f0' }} formatter={(v, name) => [typeof v === 'number' ? v.toFixed(1) : v, name]} labelFormatter={() => ''} content={({ payload }) => {
+                    if (!payload?.[0]) return null;
+                    const d = payload[0].payload;
+                    return <div style={{ background: '#111827', border: '1px solid rgba(148,163,184,0.2)', borderRadius: '8px', padding: '8px 12px', color: '#e2e8f0', fontSize: '12px' }}>
+                      <div style={{ fontWeight: 700, color: '#60a5fa' }}>HS4 {d.hs4}</div>
+                      <div style={{ color: '#94a3b8', fontSize: '11px' }}>{d.name?.slice(0, 40)}</div>
+                      <div>Trade: ${d.x?.toFixed(1)}M | Margin: {d.y?.toFixed(1)}%</div>
+                      <div>Opp Score: {d.z?.toFixed(0)} | Model: {d.model}</div>
+                    </div>;
+                  }} />
+                  <Scatter data={(analyticsStats.scatterData || []).filter(d => d.y > -50).slice(0, 100)} fill="#60a5fa" fillOpacity={0.7} />
+                </ScatterChart>
+              </ResponsiveContainer>
+            </Card>
+          </div>
+
+          {/* Filters Bar */}
+          <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center', background: '#111827', padding: '12px 16px', borderRadius: '10px', border: '1px solid rgba(148,163,184,0.08)' }}>
+            <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 600 }}>FILTERS:</span>
+            <input type="text" placeholder="Search HS4, product..." value={analyticsSF.search} onChange={e => { analyticsSF.setSearch(e.target.value); setAnalyticsPage(1); }}
+              style={{ padding: '6px 12px', background: '#1a2035', border: '1px solid rgba(148,163,184,0.12)', borderRadius: '6px', color: '#e2e8f0', fontSize: '12px', outline: 'none', minWidth: '180px' }} />
+            <select value={analyticsFilters.marginTier} onChange={e => { setAnalyticsFilters(f => ({...f, marginTier: e.target.value})); setAnalyticsPage(1); }}
+              style={{ padding: '6px 10px', background: '#1a2035', border: '1px solid rgba(148,163,184,0.12)', borderRadius: '6px', color: '#e2e8f0', fontSize: '12px', outline: 'none' }}>
+              <option value="">All Margins</option>
+              <option value="EXCELLENT">50%+ (Excellent)</option>
+              <option value="GOOD">30-50% (Good)</option>
+              <option value="MODERATE">15-30% (Moderate)</option>
+              <option value="THIN">0-15% (Thin)</option>
+              <option value="NEGATIVE">Negative</option>
+            </select>
+            <select value={analyticsFilters.marketSize} onChange={e => { setAnalyticsFilters(f => ({...f, marketSize: e.target.value})); setAnalyticsPage(1); }}
+              style={{ padding: '6px 10px', background: '#1a2035', border: '1px solid rgba(148,163,184,0.12)', borderRadius: '6px', color: '#e2e8f0', fontSize: '12px', outline: 'none' }}>
+              <option value="">All Markets</option>
+              <option value="MEGA">MEGA ($1B+)</option>
+              <option value="LARGE">LARGE ($500M-1B)</option>
+              <option value="MEDIUM">MEDIUM ($100-500M)</option>
+              <option value="SMALL">SMALL ($20-100M)</option>
+              <option value="MICRO">MICRO (&lt;$20M)</option>
+            </select>
+            <select value={analyticsFilters.tradingModel} onChange={e => { setAnalyticsFilters(f => ({...f, tradingModel: e.target.value})); setAnalyticsPage(1); }}
+              style={{ padding: '6px 10px', background: '#1a2035', border: '1px solid rgba(148,163,184,0.12)', borderRadius: '6px', color: '#e2e8f0', fontSize: '12px', outline: 'none' }}>
+              <option value="">All Models</option>
+              <option value="REGULAR">REGULAR</option>
+              <option value="SPOT">SPOT</option>
+              <option value="BROKER">BROKER</option>
+              <option value="MIXED">MIXED</option>
+            </select>
+            <select value={analyticsFilters.regRisk} onChange={e => { setAnalyticsFilters(f => ({...f, regRisk: e.target.value})); setAnalyticsPage(1); }}
+              style={{ padding: '6px 10px', background: '#1a2035', border: '1px solid rgba(148,163,184,0.12)', borderRadius: '6px', color: '#e2e8f0', fontSize: '12px', outline: 'none' }}>
+              <option value="">All Risk</option>
+              <option value="LOW">LOW Risk</option>
+              <option value="MEDIUM">MEDIUM Risk</option>
+              <option value="HIGH">HIGH Risk</option>
+              <option value="CRITICAL">CRITICAL</option>
+            </select>
+            <select value={analyticsFilters.bisReq} onChange={e => { setAnalyticsFilters(f => ({...f, bisReq: e.target.value})); setAnalyticsPage(1); }}
+              style={{ padding: '6px 10px', background: '#1a2035', border: '1px solid rgba(148,163,184,0.12)', borderRadius: '6px', color: '#e2e8f0', fontSize: '12px', outline: 'none' }}>
+              <option value="">BIS: Any</option>
+              <option value="0">No BIS Needed</option>
+              <option value="1">BIS Required</option>
+            </select>
+            <button onClick={() => { setAnalyticsFilters({ marginTier: '', marketSize: '', regRisk: '', tradingModel: '', bisReq: '', certCount: '' }); analyticsSF.setSearch(''); setAnalyticsPage(1); }}
+              style={{ padding: '6px 14px', background: 'rgba(248,113,113,0.1)', border: '1px solid rgba(248,113,113,0.2)', borderRadius: '6px', color: '#f87171', fontSize: '12px', cursor: 'pointer' }}>Clear All</button>
+            <span style={{ marginLeft: 'auto', fontSize: '12px', color: '#94a3b8' }}>{analyticsFiltered.length} of {fullAnalysis.length} codes</span>
+          </div>
+
+          {/* Master Data Table */}
+          <div style={{ border: '1px solid rgba(148,163,184,0.08)', borderRadius: '12px', overflow: 'hidden' }}>
+            <div style={{ maxHeight: '600px', overflowY: 'auto', overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', minWidth: '1400px' }}>
+                <thead><tr>
+                  <SortHeader label="HS4" field="hs4" {...analyticsSF} />
+                  <SortHeader label="Product" field="commodity" {...analyticsSF} style={{ minWidth: '180px' }} />
+                  <SortHeader label="Trade $M" field="val_m" {...analyticsSF} />
+                  <SortHeader label="Market" field="market_size_tier" {...analyticsSF} />
+                  <SortHeader label="Margin %" field="gross_margin_pct" {...analyticsSF} />
+                  <SortHeader label="Margin Tier" field="margin_tier" {...analyticsSF} />
+                  <SortHeader label="Opp Score" field="opportunity_score" {...analyticsSF} />
+                  <SortHeader label="Model" field="trading_model" {...analyticsSF} />
+                  <SortHeader label="Suppliers" field="alibaba_suppliers" {...analyticsSF} />
+                  <SortHeader label="Sellers" field="indiamart_sellers" {...analyticsSF} />
+                  <SortHeader label="FOB $" field="fob_typical_usd" {...analyticsSF} />
+                  <SortHeader label="Landed ₹" field="landed_cost_inr" {...analyticsSF} />
+                  <SortHeader label="Sell ₹" field="sell_price_inr" {...analyticsSF} />
+                  <SortHeader label="Total Duty %" field="total_duty_pct" {...analyticsSF} />
+                  <SortHeader label="Reg Risk" field="regulatory_risk_score" {...analyticsSF} />
+                  <SortHeader label="BIS" field="bis_required" {...analyticsSF} />
+                  <SortHeader label="Certs" field="cert_count" {...analyticsSF} />
+                  <SortHeader label="Entry Ease" field="ease_of_entry_score" {...analyticsSF} />
+                  <SortHeader label="Drill Score" field="drill_score" {...analyticsSF} />
+                </tr></thead>
+                <tbody>
+                  {analyticsFiltered.slice((analyticsPage - 1) * ANALYTICS_PAGE_SIZE, analyticsPage * ANALYTICS_PAGE_SIZE).map(r => {
+                    const m = r.gross_margin_pct || 0;
+                    const mColor = m > 50 ? '#34d399' : m > 30 ? '#22d3ee' : m > 15 ? '#60a5fa' : m > 0 ? '#fbbf24' : '#f87171';
+                    return (
+                      <tr key={r.hs4} onClick={() => { setDeepDiveCode(r.hs4); setActiveTab('deepdive'); }} style={{ cursor: 'pointer' }}
+                        onMouseEnter={e => e.currentTarget.style.background = 'rgba(96,165,250,0.04)'} onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                        <td style={{ ...tdStyle, fontWeight: 700, color: '#60a5fa' }}>{r.hs4}</td>
+                        <td style={{ ...tdStyle, maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.commodity}>{r.commodity}</td>
+                        <td style={{ ...tdStyle, fontWeight: 600 }}>${(r.val_m || 0).toFixed(1)}</td>
+                        <td style={tdStyle}><Badge label={r.market_size_tier || '—'} /></td>
+                        <td style={{ ...tdStyle, fontWeight: 700, color: mColor }}>{m.toFixed(1)}%</td>
+                        <td style={tdStyle}><Badge label={r.margin_tier || '—'} /></td>
+                        <td style={{ ...tdStyle, fontWeight: 600, color: '#fb923c' }}>{(r.opportunity_score || 0).toFixed(0)}</td>
+                        <td style={tdStyle}><Badge label={r.trading_model || '—'} /></td>
+                        <td style={{ ...tdStyle, color: '#60a5fa' }}>{r.alibaba_suppliers || 0}</td>
+                        <td style={{ ...tdStyle, color: '#34d399' }}>{(r.indiamart_sellers || 0).toLocaleString()}</td>
+                        <td style={tdStyle}>{r.fob_typical_usd ? `$${r.fob_typical_usd.toFixed(2)}` : '—'}</td>
+                        <td style={tdStyle}>{r.landed_cost_inr ? `₹${r.landed_cost_inr.toLocaleString()}` : '—'}</td>
+                        <td style={tdStyle}>{r.sell_price_inr ? `₹${r.sell_price_inr.toLocaleString()}` : '—'}</td>
+                        <td style={{ ...tdStyle, color: (r.total_duty_pct || 0) > 35 ? '#f87171' : '#94a3b8' }}>{r.total_duty_pct?.toFixed(1) || '—'}%</td>
+                        <td style={tdStyle}><Badge label={r.regulatory_risk_score || '—'} /></td>
+                        <td style={{ ...tdStyle, color: r.bis_required ? '#fbbf24' : '#34d399' }}>{r.bis_required ? 'Yes' : 'No'}</td>
+                        <td style={tdStyle}>{r.cert_count || 0}</td>
+                        <td style={{ ...tdStyle, fontWeight: 600, color: (r.ease_of_entry_score || 0) >= 70 ? '#34d399' : (r.ease_of_entry_score || 0) >= 40 ? '#fbbf24' : '#f87171' }}>{r.ease_of_entry_score || 0}</td>
+                        <td style={{ ...tdStyle, color: '#94a3b8' }}>{r.drill_score?.toFixed(1) || '—'}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Pagination */}
+          {analyticsFiltered.length > ANALYTICS_PAGE_SIZE && (
+            <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', marginTop: '12px', alignItems: 'center' }}>
+              <button onClick={() => setAnalyticsPage(p => Math.max(1, p - 1))} disabled={analyticsPage === 1} style={{ padding: '6px 14px', background: 'rgba(96,165,250,0.1)', color: analyticsPage === 1 ? '#64748b' : '#60a5fa', border: '1px solid rgba(96,165,250,0.2)', borderRadius: '6px', cursor: analyticsPage === 1 ? 'default' : 'pointer', fontSize: '12px' }}>← Prev</button>
+              <span style={{ color: '#94a3b8', fontSize: '12px' }}>Page {analyticsPage} of {Math.ceil(analyticsFiltered.length / ANALYTICS_PAGE_SIZE)}</span>
+              <button onClick={() => setAnalyticsPage(p => Math.min(Math.ceil(analyticsFiltered.length / ANALYTICS_PAGE_SIZE), p + 1))} disabled={analyticsPage >= Math.ceil(analyticsFiltered.length / ANALYTICS_PAGE_SIZE)} style={{ padding: '6px 14px', background: 'rgba(96,165,250,0.1)', color: analyticsPage >= Math.ceil(analyticsFiltered.length / ANALYTICS_PAGE_SIZE) ? '#64748b' : '#60a5fa', border: '1px solid rgba(96,165,250,0.2)', borderRadius: '6px', cursor: analyticsPage >= Math.ceil(analyticsFiltered.length / ANALYTICS_PAGE_SIZE) ? 'default' : 'pointer', fontSize: '12px' }}>Next →</button>
+            </div>
+          )}
+
+          {/* Top 15 Opportunities Table */}
+          <Card title="Top 15 Opportunities — Highest Opportunity Score (Margin × Market Size)" emoji="🏆" style={{ marginTop: '20px' }}>
+            <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '10px' }}>Opportunity Score = Gross Margin % × Trade Value ($M) / 100. Higher = larger addressable margin pool. Click any row for full deep dive.</div>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+              <thead><tr>
+                <th style={thStyle}>#</th><th style={thStyle}>HS4</th><th style={thStyle}>Product</th><th style={thStyle}>Trade $M</th>
+                <th style={thStyle}>Margin %</th><th style={thStyle}>Opp Score</th><th style={thStyle}>Model</th>
+                <th style={thStyle}>Suppliers</th><th style={thStyle}>Duty %</th><th style={thStyle}>Risk</th><th style={thStyle}>BIS</th><th style={thStyle}>Entry Ease</th>
+              </tr></thead>
+              <tbody>
+                {[...fullAnalysis].sort((a, b) => (b.opportunity_score || 0) - (a.opportunity_score || 0)).slice(0, 15).map((r, i) => (
+                  <tr key={r.hs4} onClick={() => { setDeepDiveCode(r.hs4); setActiveTab('deepdive'); }} style={{ cursor: 'pointer' }}
+                    onMouseEnter={e => e.currentTarget.style.background = 'rgba(96,165,250,0.04)'} onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                    <td style={{ ...tdStyle, color: i < 3 ? '#fbbf24' : '#94a3b8', fontWeight: 700 }}>{i + 1}</td>
+                    <td style={{ ...tdStyle, fontWeight: 700, color: '#60a5fa' }}>{r.hs4}</td>
+                    <td style={{ ...tdStyle, maxWidth: '250px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.commodity}</td>
+                    <td style={{ ...tdStyle, fontWeight: 600 }}>${(r.val_m || 0).toLocaleString()}</td>
+                    <td style={{ ...tdStyle, fontWeight: 700, color: (r.gross_margin_pct || 0) > 30 ? '#34d399' : (r.gross_margin_pct || 0) > 15 ? '#60a5fa' : '#fbbf24' }}>{(r.gross_margin_pct || 0).toFixed(1)}%</td>
+                    <td style={{ ...tdStyle, fontWeight: 700, color: '#fb923c', fontSize: '14px' }}>{(r.opportunity_score || 0).toFixed(0)}</td>
+                    <td style={tdStyle}><Badge label={r.trading_model || '—'} /></td>
+                    <td style={tdStyle}>{r.alibaba_suppliers || 0}</td>
+                    <td style={tdStyle}>{r.total_duty_pct?.toFixed(1) || '—'}%</td>
+                    <td style={tdStyle}><Badge label={r.regulatory_risk_score || '—'} /></td>
+                    <td style={{ ...tdStyle, color: r.bis_required ? '#fbbf24' : '#34d399' }}>{r.bis_required ? 'Yes' : 'No'}</td>
+                    <td style={{ ...tdStyle, fontWeight: 600, color: (r.ease_of_entry_score || 0) >= 70 ? '#34d399' : '#fbbf24' }}>{r.ease_of_entry_score}/100</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </Card>
+
+          {/* Quick-Win: High margin + No certification + Low risk */}
+          <Card title="Quick Wins — High Margin, No Certifications, Low Regulatory Risk" emoji="⚡" style={{ marginTop: '16px' }}>
+            <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '10px' }}>Codes with margin &gt;30%, zero BIS/WPC/TEC requirements, and LOW regulatory risk. Easiest to start importing immediately.</div>
+            {(() => {
+              const quickWins = fullAnalysis.filter(r => (r.gross_margin_pct || 0) > 30 && r.cert_count === 0 && r.regulatory_risk_score === 'LOW')
+                .sort((a, b) => (b.opportunity_score || 0) - (a.opportunity_score || 0));
+              return quickWins.length > 0 ? (
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                  <thead><tr><th style={thStyle}>HS4</th><th style={thStyle}>Product</th><th style={thStyle}>Trade $M</th><th style={thStyle}>Margin %</th><th style={thStyle}>Opp Score</th><th style={thStyle}>Model</th><th style={thStyle}>FOB $</th><th style={thStyle}>Sell ₹</th></tr></thead>
+                  <tbody>{quickWins.slice(0, 20).map(r => (
+                    <tr key={r.hs4} onClick={() => { setDeepDiveCode(r.hs4); setActiveTab('deepdive'); }} style={{ cursor: 'pointer' }}
+                      onMouseEnter={e => e.currentTarget.style.background = 'rgba(52,211,153,0.04)'} onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                      <td style={{ ...tdStyle, fontWeight: 700, color: '#60a5fa' }}>{r.hs4}</td>
+                      <td style={{ ...tdStyle, maxWidth: '300px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.commodity}</td>
+                      <td style={{ ...tdStyle, fontWeight: 600 }}>${(r.val_m || 0).toFixed(1)}</td>
+                      <td style={{ ...tdStyle, fontWeight: 700, color: '#34d399' }}>{(r.gross_margin_pct || 0).toFixed(1)}%</td>
+                      <td style={{ ...tdStyle, fontWeight: 600, color: '#fb923c' }}>{(r.opportunity_score || 0).toFixed(0)}</td>
+                      <td style={tdStyle}><Badge label={r.trading_model || '—'} /></td>
+                      <td style={tdStyle}>{r.fob_typical_usd ? `$${r.fob_typical_usd.toFixed(2)}` : '—'}</td>
+                      <td style={tdStyle}>{r.sell_price_inr ? `₹${r.sell_price_inr.toLocaleString()}` : '—'}</td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              ) : <div style={{ color: '#94a3b8', padding: '20px', textAlign: 'center' }}>No quick wins found with current criteria</div>;
+            })()}
+          </Card>
+        </div>
+      )}
 
       {/* ==================== TAB: EXECUTIVE OVERVIEW ==================== */}
       {activeTab === 'overview' && (
