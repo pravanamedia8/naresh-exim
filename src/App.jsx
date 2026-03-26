@@ -13,6 +13,7 @@ import Importers from './tabs/Importers';
 import ScoringRef from './tabs/ScoringRef';
 import BusinessIntel from './tabs/BusinessIntel';
 import ElectronicsResearch from './tabs/ElectronicsResearch';
+import ProductShortlist from './tabs/ProductShortlist';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('overview');
@@ -54,6 +55,7 @@ export default function App() {
       label: 'Electronics Research',
       tabs: [
         { id: 'electronics', label: '🔬 Electronics Research', subtitle: '180 codes pipeline' },
+        { id: 'shortlist', label: '🏆 Product Shortlist', subtitle: '35 scored + 6 deep dives' },
       ],
     },
     {
@@ -92,6 +94,8 @@ export default function App() {
         return <Importers />;
       case 'electronics':
         return <ElectronicsResearch />;
+      case 'shortlist':
+        return <ProductShortlist />;
       case 'scoring':
         return <ScoringRef />;
       default:
