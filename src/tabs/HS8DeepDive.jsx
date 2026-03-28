@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../supabaseClient';
-import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Treemap } from 'recharts';
+import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 const C = { pass: '#34d399', strong: '#60a5fa', moderate: '#fbbf24', drop: '#f87171', bg2: '#111827', bg3: '#1a2035', tx1: '#e2e8f0', tx2: '#94a3b8', border: 'rgba(148,163,184,0.08)', cyan: '#22d3ee', orange: '#fb923c', purple: '#a78bfa' };
 const VERDICT_C = { PURSUE: C.pass, STRONG: C.strong, MODERATE: C.moderate, DROP: C.drop, MIXED: C.cyan };
