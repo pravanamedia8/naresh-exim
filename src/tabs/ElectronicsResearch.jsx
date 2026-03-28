@@ -167,7 +167,7 @@ export default function ElectronicsResearch() {
     const fetchData = async () => {
       try {
         setLoading(true);
-        const [codesRes, regRes, supRes, demRes, scorRes, p4Res, vsRes, vbRes, vh8Res, vtbRes, faRes, queueRes] = await Promise.all([
+        const [codesRes, regRes, supRes, demRes, scorRes, p4Res, vsRes, vbRes, vh8Res, vtbRes, queueRes] = await Promise.all([
           supabase.from('research_codes').select('*').order('drill_score', { ascending: false }),
           supabase.from('phase2b_regulatory').select('*'),
           supabase.from('phase2_alibaba_summary').select('*'),
@@ -176,9 +176,8 @@ export default function ElectronicsResearch() {
           supabase.from('phase4_volza').select('*'),
           supabase.from('volza_shipments').select('*').limit(5000),
           supabase.from('volza_buyers').select('*'),
-          supabase.from('volza_hs8_detail').select('*').catch(() => ({ data: [] })),
-          supabase.from('volza_top_buyers').select('*').catch(() => ({ data: [] })),
-          supabase.from('electronics_full_analysis').select('*').order('opportunity_score', { ascending: false }),
+          supabase.from('volza_hs8_detail').select('*'),
+          supabase.from('volza_top_buyers').select('*'),
           supabase.from('volza_scrape_queue').select('*'),
         ]);
         setCodes(codesRes.data || []);
@@ -191,7 +190,7 @@ export default function ElectronicsResearch() {
         setVolzaBuyers(vbRes.data || []);
         setVolzaHS8Detail(vh8Res.data || []);
         setVolzaTopBuyers(vtbRes.data || []);
-        setFullAnalysis(faRes.data || []);
+        setFullAnalysis([]);
         setVolzaQueue(queueRes.data || []);
       } catch (err) { console.error('Fetch error:', err); }
       finally { setLoading(false); }
