@@ -127,10 +127,13 @@ export default function ElectronicsResearch() {
   const [phase4, setPhase4] = useState([]);
   const [volzaShipments, setVolzaShipments] = useState([]);
   const [volzaBuyers, setVolzaBuyers] = useState([]);
+  const [volzaHS8Detail, setVolzaHS8Detail] = useState([]);
+  const [volzaTopBuyers, setVolzaTopBuyers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [volzaHS4Filter, setVolzaHS4Filter] = useState('');
   const [volzaView, setVolzaView] = useState('overview');
+  const [selectedVolzaHS4, setSelectedVolzaHS4] = useState(null);
   const [fullAnalysis, setFullAnalysis] = useState([]);
   const [analyticsFilters, setAnalyticsFilters] = useState({ marginTier: '', marketSize: '', regRisk: '', tradingModel: '', bisReq: '', certCount: '' });
   const [volzaQueue, setVolzaQueue] = useState([]);
@@ -164,7 +167,7 @@ export default function ElectronicsResearch() {
     const fetchData = async () => {
       try {
         setLoading(true);
-        const [codesRes, regRes, supRes, demRes, scorRes, p4Res, vsRes, vbRes, faRes, queueRes] = await Promise.all([
+        const [codesRes, regRes, supRes, demRes, scorRes, p4Res, vsRes, vbRes, vh8Res, vtbRes, faRes, queueRes] = await Promise.all([
           supabase.from('research_codes').select('*').order('drill_score', { ascending: false }),
           supabase.from('phase2b_regulatory').select('*'),
           supabase.from('phase2_alibaba_summary').select('*'),
@@ -173,6 +176,8 @@ export default function ElectronicsResearch() {
           supabase.from('phase4_volza').select('*'),
           supabase.from('volza_shipments').select('*').limit(5000),
           supabase.from('volza_buyers').select('*'),
+          supabase.from('volza_hs8_detail').select('*').catch(() => ({ data: [] })),
+          supabase.from('volza_top_buyers').select('*').catch(() => ({ data: [] })),
           supabase.from('electronics_full_analysis').select('*').order('opportunity_score', { ascending: false }),
           supabase.from('volza_scrape_queue').select('*'),
         ]);
@@ -184,6 +189,8 @@ export default function ElectronicsResearch() {
         setPhase4(p4Res.data || []);
         setVolzaShipments(vsRes.data || []);
         setVolzaBuyers(vbRes.data || []);
+        setVolzaHS8Detail(vh8Res.data || []);
+        setVolzaTopBuyers(vtbRes.data || []);
         setFullAnalysis(faRes.data || []);
         setVolzaQueue(queueRes.data || []);
       } catch (err) { console.error('Fetch error:', err); }
@@ -199,6 +206,8 @@ export default function ElectronicsResearch() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'phase4_volza' }, () => fetchData())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'volza_shipments' }, () => fetchData())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'volza_buyers' }, () => fetchData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'volza_hs8_detail' }, () => fetchData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'volza_top_buyers' }, () => fetchData())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'volza_scrape_queue' }, () => fetchData())
       .subscribe();
     return () => sub.unsubscribe();
@@ -1328,9 +1337,9 @@ export default function ElectronicsResearch() {
                   <option value="">All HS4 Codes ({hs4List.length})</option>
                   {hs4List.map(h => <option key={h} value={h}>HS4 {h} ({byHS4[h]?.count || 0} shipments)</option>)}
                 </select>
-                {['overview', 'shipments', 'buyers', 'phase4', 'scrapequeue'].map(v => (
+                {['overview', 'shipments', 'buyers', 'hs8deep', 'topbuyers', 'phase4', 'scrapequeue'].map(v => (
                   <button key={v} onClick={() => setVolzaView(v)} style={{ padding: '6px 14px', borderRadius: '8px', fontSize: '12px', fontWeight: volzaView === v ? 600 : 400, background: volzaView === v ? RGB.blue : 'transparent', color: volzaView === v ? COLORS.blue : '#94a3b8', border: `1px solid ${volzaView === v ? COLORS.blue + '50' : 'rgba(148,163,184,0.08)'}`, cursor: 'pointer' }}>
-                    {v === 'overview' ? '📊 Overview' : v === 'shipments' ? '🚢 Shipments' : v === 'buyers' ? '🎯 Buyers' : v === 'phase4' ? '📋 Phase 4 Results' : '📑 Scrape Queue'}
+                    {v === 'overview' ? '📊 Overview' : v === 'shipments' ? '🚢 Shipments' : v === 'buyers' ? '🎯 Buyers' : v === 'hs8deep' ? '🔬 HS8 Deep' : v === 'topbuyers' ? '👥 Top Buyers' : v === 'phase4' ? '📋 Phase 4' : '📑 Queue'}
                   </button>
                 ))}
               </div>
@@ -1594,6 +1603,166 @@ export default function ElectronicsResearch() {
                     <Metric label="China Sourcing" value="> 40%" color={COLORS.pass} sub="Alibaba supply validated" />
                   </div>
                 </Card>
+              </div>
+            )}
+
+            {/* HS8 DEEP DIVE SUB-TAB */}
+            {volzaView === 'hs8deep' && (
+              <div>
+                <div style={{ marginBottom: '16px', display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <select value={selectedVolzaHS4} onChange={e => setSelectedVolzaHS4(e.target.value)} style={{ padding: '8px 12px', background: '#1a2035', border: '1px solid rgba(148,163,184,0.1)', borderRadius: '8px', color: '#e2e8f0', fontSize: '13px', outline: 'none', minWidth: '200px' }}>
+                    <option value="">-- Select HS4 Code --</option>
+                    {[...new Set(volzaShipments.map(s => s.hs4).filter(Boolean))].sort().map(h4 => {
+                      const codeInfo = codes.find(c => c.hs4 === h4);
+                      const shipCount = volzaShipments.filter(s => s.hs4 === h4).length;
+                      return <option key={h4} value={h4}>HS4 {h4} — {codeInfo?.commodity || 'Unknown'} ({shipCount} ships)</option>;
+                    })}
+                  </select>
+                  <span style={{ fontSize: '12px', color: '#94a3b8' }}>
+                    {selectedVolzaHS4 ? `${volzaHS8Detail.filter(h => h.hs4 === selectedVolzaHS4).length} HS8 sub-codes` : 'Select a code to view HS8 breakdown'}
+                  </span>
+                </div>
+
+                {!selectedVolzaHS4 || volzaHS8Detail.filter(h => h.hs4 === selectedVolzaHS4).length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '60px', color: '#94a3b8' }}>
+                    {selectedVolzaHS4 ? `No HS8 detail data yet for HS4 ${selectedVolzaHS4}. Data will populate as Volza scraping progresses.` : 'Select an HS4 code to view its HS8 sub-product breakdown.'}
+                  </div>
+                ) : (() => {
+                  const hs8ForCode = volzaHS8Detail.filter(h => h.hs4 === selectedVolzaHS4);
+                  const hs8SF = useSortFilter(hs8ForCode, 'shipment_count', 'desc');
+                  const totalShips = hs8ForCode.reduce((a, h) => a + (h.shipment_count || 0), 0);
+                  const totalCIF = hs8ForCode.reduce((a, h) => a + (h.total_cif_usd || 0), 0);
+                  const avgChina = hs8ForCode.length > 0 ? (hs8ForCode.reduce((a, h) => a + (h.china_pct || 0), 0) / hs8ForCode.length).toFixed(1) : 0;
+
+                  return (
+                    <>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '12px', marginBottom: '20px' }}>
+                        <Metric label="HS8 Sub-codes" value={hs8ForCode.length} color={COLORS.blue} />
+                        <Metric label="Total Shipments" value={totalShips.toLocaleString()} color={COLORS.cyan} />
+                        <Metric label="Total CIF Value" value={`$${(totalCIF / 1e6).toFixed(2)}M`} color={COLORS.pass} />
+                        <Metric label="Unique Buyers" value={[...new Set(hs8ForCode.flatMap(h => h.unique_buyers || 0))].length || '—'} color={COLORS.orange} />
+                        <Metric label="Avg China %" value={`${avgChina}%`} color={COLORS.maybe} />
+                        <Metric label="Avg Unit Rate" value={`$${(hs8ForCode.reduce((a, h) => a + (h.avg_unit_rate_usd || 0), 0) / hs8ForCode.length).toFixed(2)}`} color={COLORS.watch} />
+                      </div>
+
+                      <div style={{ display: 'flex', gap: '12px', marginBottom: '16px', alignItems: 'center' }}>
+                        <input type="text" placeholder="Search HS8 code, product..." value={hs8SF.search} onChange={e => hs8SF.setSearch(e.target.value)}
+                          style={{ padding: '8px 12px', background: '#1a2035', border: '1px solid rgba(148,163,184,0.1)', borderRadius: '8px', color: '#e2e8f0', fontSize: '12px', outline: 'none', flex: 1, minWidth: '200px' }} />
+                        <span style={{ fontSize: '12px', color: '#64748b' }}>Showing {hs8SF.sorted.length}</span>
+                      </div>
+
+                      <div style={{ border: '1px solid rgba(148,163,184,0.08)', borderRadius: '12px', overflow: 'hidden', maxHeight: '700px', overflowY: 'auto' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                          <thead><tr>
+                            <SortHeader label="HS8" field="hs8_code" sortField={hs8SF.sortField} sortDir={hs8SF.sortDir} onSort={hs8SF.onSort} />
+                            <th style={{ ...thStyle, maxWidth: '250px' }}>Product Description</th>
+                            <SortHeader label="Shipments" field="shipment_count" sortField={hs8SF.sortField} sortDir={hs8SF.sortDir} onSort={hs8SF.onSort} />
+                            <SortHeader label="Buyers" field="unique_buyers" sortField={hs8SF.sortField} sortDir={hs8SF.sortDir} onSort={hs8SF.onSort} />
+                            <SortHeader label="Shippers" field="unique_shippers" sortField={hs8SF.sortField} sortDir={hs8SF.sortDir} onSort={hs8SF.onSort} />
+                            <SortHeader label="Total CIF $" field="total_cif_usd" sortField={hs8SF.sortField} sortDir={hs8SF.sortDir} onSort={hs8SF.onSort} />
+                            <SortHeader label="Avg CIF $" field="avg_cif_usd" sortField={hs8SF.sortField} sortDir={hs8SF.sortDir} onSort={hs8SF.onSort} />
+                            <SortHeader label="Avg Unit Rate" field="avg_unit_rate_usd" sortField={hs8SF.sortField} sortDir={hs8SF.sortDir} onSort={hs8SF.onSort} />
+                            <SortHeader label="China %" field="china_pct" sortField={hs8SF.sortField} sortDir={hs8SF.sortDir} onSort={hs8SF.onSort} />
+                            <th style={thStyle}>Date Range</th>
+                          </tr></thead>
+                          <tbody>{hs8SF.sorted.map((h, i) => (
+                            <tr key={i} style={{ background: i % 2 === 0 ? 'transparent' : 'rgba(96,165,250,0.02)' }} onMouseEnter={e => e.currentTarget.style.background = 'rgba(96,165,250,0.04)'} onMouseLeave={e => e.currentTarget.style.background = i % 2 === 0 ? 'transparent' : 'rgba(96,165,250,0.02)'}>
+                              <td style={{ ...tdStyle, fontWeight: 700, color: COLORS.blue }}>{h.hs8_code}</td>
+                              <td style={{ ...tdStyle, maxWidth: '250px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={h.product_desc}>{h.product_desc}</td>
+                              <td style={{ ...tdStyle, fontWeight: 600 }}>{h.shipment_count?.toLocaleString() || '—'}</td>
+                              <td style={tdStyle}>{h.unique_buyers || '—'}</td>
+                              <td style={tdStyle}>{h.unique_shippers || '—'}</td>
+                              <td style={{ ...tdStyle, fontWeight: 600 }}>${(h.total_cif_usd / 1000).toFixed(1)}K</td>
+                              <td style={tdStyle}>${(h.avg_cif_usd || 0).toFixed(0)}</td>
+                              <td style={tdStyle}>${(h.avg_unit_rate_usd || 0).toFixed(2)}</td>
+                              <td style={{ ...tdStyle, color: h.china_pct > 70 ? COLORS.maybe : h.china_pct > 40 ? COLORS.pass : COLORS.watch, fontWeight: 600 }}>{(h.china_pct || 0).toFixed(0)}%</td>
+                              <td style={{ ...tdStyle, fontSize: '11px', color: '#64748b' }}>{h.first_date ? `${String(h.first_date).substring(0, 10)}` : '—'} → {h.last_date ? `${String(h.last_date).substring(0, 10)}` : '—'}</td>
+                            </tr>
+                          ))}</tbody>
+                        </table>
+                      </div>
+                    </>
+                  );
+                })()}
+              </div>
+            )}
+
+            {/* TOP BUYERS SUB-TAB */}
+            {volzaView === 'topbuyers' && (
+              <div>
+                <div style={{ marginBottom: '16px', display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <select value={selectedVolzaHS4} onChange={e => setSelectedVolzaHS4(e.target.value)} style={{ padding: '8px 12px', background: '#1a2035', border: '1px solid rgba(148,163,184,0.1)', borderRadius: '8px', color: '#e2e8f0', fontSize: '13px', outline: 'none', minWidth: '200px' }}>
+                    <option value="">-- Select HS4 Code --</option>
+                    {[...new Set(volzaTopBuyers.map(b => b.hs4).filter(Boolean))].sort().map(h4 => {
+                      const codeInfo = codes.find(c => c.hs4 === h4);
+                      const buyerCount = volzaTopBuyers.filter(b => b.hs4 === h4).length;
+                      return <option key={h4} value={h4}>HS4 {h4} — {codeInfo?.commodity || 'Unknown'} ({buyerCount} buyers)</option>;
+                    })}
+                  </select>
+                  <span style={{ fontSize: '12px', color: '#94a3b8' }}>
+                    {selectedVolzaHS4 ? `${volzaTopBuyers.filter(b => b.hs4 === selectedVolzaHS4).length} top buyers` : 'Select a code to view top buyers'}
+                  </span>
+                </div>
+
+                {!selectedVolzaHS4 || volzaTopBuyers.filter(b => b.hs4 === selectedVolzaHS4).length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '60px', color: '#94a3b8' }}>
+                    {selectedVolzaHS4 ? `No buyer data yet for HS4 ${selectedVolzaHS4}. Data will populate as Volza scraping progresses.` : 'Select an HS4 code to view its top buyers.'}
+                  </div>
+                ) : (() => {
+                  const buyersForCode = volzaTopBuyers.filter(b => b.hs4 === selectedVolzaHS4);
+                  const buyersSF = useSortFilter(buyersForCode, 'shipment_count', 'desc');
+                  const totalBuyers = buyersForCode.length;
+                  const totalCIF = buyersForCode.reduce((a, b) => a + (b.total_cif_usd || 0), 0);
+                  const avgCIF = totalBuyers > 0 ? totalCIF / totalBuyers : 0;
+
+                  return (
+                    <>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '12px', marginBottom: '20px' }}>
+                        <Metric label="Total Buyers" value={totalBuyers} color={COLORS.blue} />
+                        <Metric label="Total CIF Value" value={`$${(totalCIF / 1e6).toFixed(2)}M`} color={COLORS.pass} />
+                        <Metric label="Avg CIF/Buyer" value={`$${(avgCIF / 1000).toFixed(1)}K`} color={COLORS.cyan} />
+                        <Metric label="Avg Shipments" value={((buyersForCode.reduce((a, b) => a + (b.shipment_count || 0), 0) / totalBuyers) || 0).toFixed(0)} color={COLORS.orange} />
+                      </div>
+
+                      <div style={{ display: 'flex', gap: '12px', marginBottom: '16px', alignItems: 'center' }}>
+                        <input type="text" placeholder="Search company name..." value={buyersSF.search} onChange={e => buyersSF.setSearch(e.target.value)}
+                          style={{ padding: '8px 12px', background: '#1a2035', border: '1px solid rgba(148,163,184,0.1)', borderRadius: '8px', color: '#e2e8f0', fontSize: '12px', outline: 'none', flex: 1, minWidth: '250px' }} />
+                        <span style={{ fontSize: '12px', color: '#64748b' }}>Showing {buyersSF.sorted.length}</span>
+                      </div>
+
+                      <div style={{ border: '1px solid rgba(148,163,184,0.08)', borderRadius: '12px', overflow: 'hidden', maxHeight: '700px', overflowY: 'auto' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                          <thead><tr>
+                            <th style={thStyle}>Rank</th>
+                            <SortHeader label="Company Name" field="company_name" sortField={buyersSF.sortField} sortDir={buyersSF.sortDir} onSort={buyersSF.onSort} style={{ minWidth: '200px' }} />
+                            <th style={thStyle}>IEC</th>
+                            <th style={thStyle}>City</th>
+                            <th style={thStyle}>State</th>
+                            <SortHeader label="Shipments" field="shipment_count" sortField={buyersSF.sortField} sortDir={buyersSF.sortDir} onSort={buyersSF.onSort} />
+                            <SortHeader label="Total CIF $" field="total_cif_usd" sortField={buyersSF.sortField} sortDir={buyersSF.sortDir} onSort={buyersSF.onSort} />
+                            <SortHeader label="Avg Rate $" field="avg_unit_rate_usd" sortField={buyersSF.sortField} sortDir={buyersSF.sortDir} onSort={buyersSF.onSort} />
+                            <th style={thStyle}>HS8 Codes</th>
+                            <SortHeader label="China %" field="china_pct" sortField={buyersSF.sortField} sortDir={buyersSF.sortDir} onSort={buyersSF.onSort} />
+                          </tr></thead>
+                          <tbody>{buyersSF.sorted.map((b, i) => (
+                            <tr key={i} style={{ background: i % 2 === 0 ? 'transparent' : 'rgba(96,165,250,0.02)' }} onMouseEnter={e => e.currentTarget.style.background = 'rgba(96,165,250,0.04)'} onMouseLeave={e => e.currentTarget.style.background = i % 2 === 0 ? 'transparent' : 'rgba(96,165,250,0.02)'}>
+                              <td style={{ ...tdStyle, fontWeight: 700, color: COLORS.blue, textAlign: 'center' }}>{i + 1}</td>
+                              <td style={{ ...tdStyle, fontWeight: 600, color: COLORS.cyan, maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={b.company_name}>{b.company_name}</td>
+                              <td style={{ ...tdStyle, fontSize: '11px', color: '#94a3b8' }}>{b.iec || '—'}</td>
+                              <td style={tdStyle}>{b.city || '—'}</td>
+                              <td style={tdStyle}>{b.state || '—'}</td>
+                              <td style={{ ...tdStyle, fontWeight: 600 }}>{b.shipment_count || 0}</td>
+                              <td style={{ ...tdStyle, fontWeight: 600 }}>${(b.total_cif_usd / 1000).toFixed(1)}K</td>
+                              <td style={tdStyle}>${(b.avg_unit_rate_usd || 0).toFixed(2)}</td>
+                              <td style={{ ...tdStyle, fontSize: '11px' }}>{b.hs8_codes_count || 0} codes</td>
+                              <td style={{ ...tdStyle, color: b.china_pct > 70 ? COLORS.maybe : b.china_pct > 40 ? COLORS.pass : COLORS.watch, fontWeight: 600 }}>{(b.china_pct || 0).toFixed(0)}%</td>
+                            </tr>
+                          ))}</tbody>
+                        </table>
+                      </div>
+                    </>
+                  );
+                })()}
               </div>
             )}
 
