@@ -14,6 +14,7 @@ import ScoringRef from './tabs/ScoringRef';
 import BusinessIntel from './tabs/BusinessIntel';
 import ElectronicsResearch from './tabs/ElectronicsResearch';
 import ProductShortlist from './tabs/ProductShortlist';
+import HS8DeepDive from './tabs/HS8DeepDive';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('overview');
@@ -56,6 +57,7 @@ export default function App() {
       tabs: [
         { id: 'electronics', label: '🔬 Electronics Research', subtitle: '180 codes pipeline' },
         { id: 'shortlist', label: '🏆 Product Shortlist', subtitle: '35 scored + 6 deep dives' },
+        { id: 'hs8deep', label: '🔎 HS8 Deep Dive', subtitle: '249 products, 3.6K buyers' },
       ],
     },
     {
@@ -96,6 +98,8 @@ export default function App() {
         return <ElectronicsResearch />;
       case 'shortlist':
         return <ProductShortlist />;
+      case 'hs8deep':
+        return <HS8DeepDive />;
       case 'scoring':
         return <ScoringRef />;
       default:
