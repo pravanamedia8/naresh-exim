@@ -133,6 +133,30 @@ export default function ElectronicsResearch() {
   const [volzaView, setVolzaView] = useState('overview');
   const [fullAnalysis, setFullAnalysis] = useState([]);
   const [analyticsFilters, setAnalyticsFilters] = useState({ marginTier: '', marketSize: '', regRisk: '', tradingModel: '', bisReq: '', certCount: '' });
+  const [volzaQueue, setVolzaQueue] = useState([]);
+  // Shipments sort/filter
+  const [shipmentSort, setShipmentSort] = useState('date');
+  const [shipmentSortDir, setShipmentSortDir] = useState('desc');
+  const [shipmentCountryFilter, setShipmentCountryFilter] = useState('');
+  const [shipmentDateFrom, setShipmentDateFrom] = useState('');
+  const [shipmentDateTo, setShipmentDateTo] = useState('');
+  const [shipmentCifMin, setShipmentCifMin] = useState('');
+  const [shipmentCifMax, setShipmentCifMax] = useState('');
+  const [shipmentConsigneeSearch, setShipmentConsigneeSearch] = useState('');
+  // Buyers sort/filter
+  const [buyerSort, setBuyerSort] = useState('total_cif_usd');
+  const [buyerSortDir, setBuyerSortDir] = useState('desc');
+  const [buyerClassFilter, setBuyerClassFilter] = useState('');
+  const [buyerNameSearch, setBuyerNameSearch] = useState('');
+  const [buyerChinaMin, setBuyerChinaMin] = useState('');
+  const [buyerChinaMax, setBuyerChinaMax] = useState('');
+  // Phase4 sort
+  const [phase4Sort, setPhase4Sort] = useState('total_shipments');
+  const [phase4SortDir, setPhase4SortDir] = useState('desc');
+  // Scrape queue sort/filter
+  const [queueSort, setQueueSort] = useState('priority');
+  const [queueSortDir, setQueueSortDir] = useState('asc');
+  const [queueStatusFilter, setQueueStatusFilter] = useState('');
   const PAGE_SIZE = 50;
 
   // Fetch all data
@@ -140,7 +164,7 @@ export default function ElectronicsResearch() {
     const fetchData = async () => {
       try {
         setLoading(true);
-        const [codesRes, regRes, supRes, demRes, scorRes, p4Res, vsRes, vbRes, faRes] = await Promise.all([
+        const [codesRes, regRes, supRes, demRes, scorRes, p4Res, vsRes, vbRes, faRes, queueRes] = await Promise.all([
           supabase.from('research_codes').select('*').order('drill_score', { ascending: false }),
           supabase.from('phase2b_regulatory').select('*'),
           supabase.from('phase2_alibaba_summary').select('*'),
@@ -150,6 +174,7 @@ export default function ElectronicsResearch() {
           supabase.from('volza_shipments').select('*').limit(5000),
           supabase.from('volza_buyers').select('*'),
           supabase.from('electronics_full_analysis').select('*').order('opportunity_score', { ascending: false }),
+          supabase.from('volza_scrape_queue').select('*'),
         ]);
         setCodes(codesRes.data || []);
         setRegulatory(regRes.data || []);
@@ -160,6 +185,7 @@ export default function ElectronicsResearch() {
         setVolzaShipments(vsRes.data || []);
         setVolzaBuyers(vbRes.data || []);
         setFullAnalysis(faRes.data || []);
+        setVolzaQueue(queueRes.data || []);
       } catch (err) { console.error('Fetch error:', err); }
       finally { setLoading(false); }
     };
@@ -173,6 +199,7 @@ export default function ElectronicsResearch() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'phase4_volza' }, () => fetchData())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'volza_shipments' }, () => fetchData())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'volza_buyers' }, () => fetchData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'volza_scrape_queue' }, () => fetchData())
       .subscribe();
     return () => sub.unsubscribe();
   }, []);
@@ -1207,8 +1234,72 @@ export default function ElectronicsResearch() {
         const buyers = volzaBuyers;
         const p4Data = phase4;
         const hs4List = [...new Set(shipments.map(s => s.hs4).filter(Boolean))].sort();
-        const filteredShipments = volzaHS4Filter ? shipments.filter(s => s.hs4 === volzaHS4Filter) : shipments;
-        const filteredBuyers = volzaHS4Filter ? buyers.filter(b => (b.hs_codes || '').includes(volzaHS4Filter)) : buyers;
+
+        // Filtered and sorted shipments
+        let filteredShipments = volzaHS4Filter ? shipments.filter(s => s.hs4 === volzaHS4Filter) : shipments;
+        // Apply country filter
+        if (shipmentCountryFilter) filteredShipments = filteredShipments.filter(s => s.country_origin === shipmentCountryFilter);
+        // Apply date range filter
+        if (shipmentDateFrom) filteredShipments = filteredShipments.filter(s => s.date >= shipmentDateFrom);
+        if (shipmentDateTo) filteredShipments = filteredShipments.filter(s => s.date <= shipmentDateTo);
+        // Apply CIF range filter
+        if (shipmentCifMin) filteredShipments = filteredShipments.filter(s => (Number(s.cif_value_usd) || 0) >= Number(shipmentCifMin));
+        if (shipmentCifMax) filteredShipments = filteredShipments.filter(s => (Number(s.cif_value_usd) || 0) <= Number(shipmentCifMax));
+        // Apply consignee search
+        if (shipmentConsigneeSearch) {
+          const search = shipmentConsigneeSearch.toLowerCase();
+          filteredShipments = filteredShipments.filter(s =>
+            (s.consignee_name || '').toLowerCase().includes(search) ||
+            (s.shipper_name || '').toLowerCase().includes(search)
+          );
+        }
+        // Apply sorting to shipments
+        filteredShipments = [...filteredShipments].sort((a, b) => {
+          let aVal = a[shipmentSort], bVal = b[shipmentSort];
+          if (aVal == null && bVal == null) return 0;
+          if (aVal == null) return 1;
+          if (bVal == null) return -1;
+          if (typeof aVal === 'number' && typeof bVal === 'number') {
+            return shipmentSortDir === 'asc' ? aVal - bVal : bVal - aVal;
+          }
+          return shipmentSortDir === 'asc' ? String(aVal).localeCompare(String(bVal)) : String(bVal).localeCompare(String(aVal));
+        });
+
+        // Filtered and sorted buyers
+        let filteredBuyers = volzaHS4Filter ? buyers.filter(b => (b.hs_codes || '').includes(volzaHS4Filter)) : buyers;
+        // Apply classification filter
+        if (buyerClassFilter) filteredBuyers = filteredBuyers.filter(b => (b.classification || 'UNKNOWN') === buyerClassFilter);
+        // Apply name search
+        if (buyerNameSearch) {
+          const search = buyerNameSearch.toLowerCase();
+          filteredBuyers = filteredBuyers.filter(b => (b.company_name || '').toLowerCase().includes(search));
+        }
+        // Apply china % range filter
+        if (buyerChinaMin) filteredBuyers = filteredBuyers.filter(b => (Number(b.china_pct) || 0) >= Number(buyerChinaMin));
+        if (buyerChinaMax) filteredBuyers = filteredBuyers.filter(b => (Number(b.china_pct) || 0) <= Number(buyerChinaMax));
+        // Apply sorting to buyers
+        filteredBuyers = [...filteredBuyers].sort((a, b) => {
+          let aVal = a[buyerSort], bVal = b[buyerSort];
+          if (aVal == null && bVal == null) return 0;
+          if (aVal == null) return 1;
+          if (bVal == null) return -1;
+          if (typeof aVal === 'number' && typeof bVal === 'number') {
+            return buyerSortDir === 'asc' ? aVal - bVal : bVal - aVal;
+          }
+          return buyerSortDir === 'asc' ? String(aVal).localeCompare(String(bVal)) : String(bVal).localeCompare(String(aVal));
+        });
+
+        // Sorted phase4 data
+        let sortedPhase4 = [...p4Data].sort((a, b) => {
+          let aVal = a[phase4Sort], bVal = b[phase4Sort];
+          if (aVal == null && bVal == null) return 0;
+          if (aVal == null) return 1;
+          if (bVal == null) return -1;
+          if (typeof aVal === 'number' && typeof bVal === 'number') {
+            return phase4SortDir === 'asc' ? aVal - bVal : bVal - aVal;
+          }
+          return phase4SortDir === 'asc' ? String(aVal).localeCompare(String(bVal)) : String(bVal).localeCompare(String(aVal));
+        });
         const totalCIF = filteredShipments.reduce((a, s) => a + (Number(s.cif_value_usd) || 0), 0);
         const uniqueConsignees = [...new Set(filteredShipments.map(s => s.consignee_name).filter(Boolean))].length;
         const uniqueShippers = [...new Set(filteredShipments.map(s => s.shipper_name).filter(Boolean))].length;
@@ -1237,9 +1328,9 @@ export default function ElectronicsResearch() {
                   <option value="">All HS4 Codes ({hs4List.length})</option>
                   {hs4List.map(h => <option key={h} value={h}>HS4 {h} ({byHS4[h]?.count || 0} shipments)</option>)}
                 </select>
-                {['overview', 'shipments', 'buyers', 'phase4'].map(v => (
+                {['overview', 'shipments', 'buyers', 'phase4', 'scrapequeue'].map(v => (
                   <button key={v} onClick={() => setVolzaView(v)} style={{ padding: '6px 14px', borderRadius: '8px', fontSize: '12px', fontWeight: volzaView === v ? 600 : 400, background: volzaView === v ? RGB.blue : 'transparent', color: volzaView === v ? COLORS.blue : '#94a3b8', border: `1px solid ${volzaView === v ? COLORS.blue + '50' : 'rgba(148,163,184,0.08)'}`, cursor: 'pointer' }}>
-                    {v === 'overview' ? '📊 Overview' : v === 'shipments' ? '🚢 Shipments' : v === 'buyers' ? '🎯 Buyers' : '📋 Phase 4 Results'}
+                    {v === 'overview' ? '📊 Overview' : v === 'shipments' ? '🚢 Shipments' : v === 'buyers' ? '🎯 Buyers' : v === 'phase4' ? '📋 Phase 4 Results' : '📑 Scrape Queue'}
                   </button>
                 ))}
               </div>
@@ -1343,14 +1434,37 @@ export default function ElectronicsResearch() {
                 {filteredShipments.length === 0 ? (
                   <div style={{ textAlign: 'center', padding: '60px', color: '#94a3b8' }}>No shipment records{volzaHS4Filter ? ` for HS4 ${volzaHS4Filter}` : ''}. Data populates as Volza scraping progresses.</div>
                 ) : (
-                  <div style={{ border: '1px solid rgba(148,163,184,0.08)', borderRadius: '12px', overflow: 'hidden', maxHeight: '700px', overflowY: 'auto' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
-                      <thead><tr>
-                        <th style={thStyle}>Date</th><th style={thStyle}>HS4</th><th style={thStyle}>HS Code</th><th style={thStyle}>Product</th>
-                        <th style={thStyle}>Consignee</th><th style={thStyle}>Shipper</th><th style={thStyle}>CIF $</th><th style={thStyle}>Unit Rate $</th>
-                        <th style={thStyle}>Qty</th><th style={thStyle}>Origin</th><th style={thStyle}>City</th><th style={thStyle}>Duty %</th>
-                      </tr></thead>
-                      <tbody>{filteredShipments.slice(0, 200).map((s, i) => (
+                  <>
+                    <div style={{ display: 'flex', gap: '12px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
+                      <input type="text" placeholder="Search consignee/shipper..." value={shipmentConsigneeSearch} onChange={e => setShipmentConsigneeSearch(e.target.value)}
+                        style={{ padding: '8px 12px', background: '#1a2035', border: '1px solid rgba(148,163,184,0.1)', borderRadius: '8px', color: '#e2e8f0', fontSize: '12px', outline: 'none', minWidth: '180px' }} />
+                      <select value={shipmentCountryFilter} onChange={e => setShipmentCountryFilter(e.target.value)} style={{ padding: '8px 12px', background: '#1a2035', border: '1px solid rgba(148,163,184,0.1)', borderRadius: '8px', color: '#e2e8f0', fontSize: '12px', outline: 'none' }}>
+                        <option value="">All Countries</option>
+                        {[...new Set(shipments.map(s => s.country_origin).filter(Boolean))].sort().map(c => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                      <input type="date" placeholder="Date From" value={shipmentDateFrom} onChange={e => setShipmentDateFrom(e.target.value)}
+                        style={{ padding: '8px 12px', background: '#1a2035', border: '1px solid rgba(148,163,184,0.1)', borderRadius: '8px', color: '#e2e8f0', fontSize: '12px', outline: 'none' }} />
+                      <input type="date" placeholder="Date To" value={shipmentDateTo} onChange={e => setShipmentDateTo(e.target.value)}
+                        style={{ padding: '8px 12px', background: '#1a2035', border: '1px solid rgba(148,163,184,0.1)', borderRadius: '8px', color: '#e2e8f0', fontSize: '12px', outline: 'none' }} />
+                      <input type="number" placeholder="CIF Min $" value={shipmentCifMin} onChange={e => setShipmentCifMin(e.target.value)}
+                        style={{ padding: '8px 12px', background: '#1a2035', border: '1px solid rgba(148,163,184,0.1)', borderRadius: '8px', color: '#e2e8f0', fontSize: '12px', outline: 'none', width: '120px' }} />
+                      <input type="number" placeholder="CIF Max $" value={shipmentCifMax} onChange={e => setShipmentCifMax(e.target.value)}
+                        style={{ padding: '8px 12px', background: '#1a2035', border: '1px solid rgba(148,163,184,0.1)', borderRadius: '8px', color: '#e2e8f0', fontSize: '12px', outline: 'none', width: '120px' }} />
+                      <span style={{ fontSize: '12px', color: '#64748b' }}>Showing {Math.min(filteredShipments.length, 200)} of {filteredShipments.length}</span>
+                    </div>
+                    <div style={{ border: '1px solid rgba(148,163,184,0.08)', borderRadius: '12px', overflow: 'hidden', maxHeight: '700px', overflowY: 'auto' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
+                        <thead><tr>
+                          <SortHeader label="Date" field="date" sortField={shipmentSort} sortDir={shipmentSortDir} onSort={(f) => { if (shipmentSort === f) setShipmentSortDir(d => d === 'asc' ? 'desc' : 'asc'); else { setShipmentSort(f); setShipmentSortDir('desc'); } }} />
+                          <th style={thStyle}>HS4</th><th style={thStyle}>HS Code</th><th style={thStyle}>Product</th>
+                          <th style={thStyle}>Consignee</th><th style={thStyle}>Shipper</th>
+                          <SortHeader label="CIF $" field="cif_value_usd" sortField={shipmentSort} sortDir={shipmentSortDir} onSort={(f) => { if (shipmentSort === f) setShipmentSortDir(d => d === 'asc' ? 'desc' : 'asc'); else { setShipmentSort(f); setShipmentSortDir('desc'); } }} />
+                          <SortHeader label="Unit Rate $" field="unit_rate_usd" sortField={shipmentSort} sortDir={shipmentSortDir} onSort={(f) => { if (shipmentSort === f) setShipmentSortDir(d => d === 'asc' ? 'desc' : 'asc'); else { setShipmentSort(f); setShipmentSortDir('desc'); } }} />
+                          <SortHeader label="Qty" field="std_qty" sortField={shipmentSort} sortDir={shipmentSortDir} onSort={(f) => { if (shipmentSort === f) setShipmentSortDir(d => d === 'asc' ? 'desc' : 'asc'); else { setShipmentSort(f); setShipmentSortDir('desc'); } }} />
+                          <th style={thStyle}>Origin</th><th style={thStyle}>City</th>
+                          <SortHeader label="Duty %" field="tax_pct" sortField={shipmentSort} sortDir={shipmentSortDir} onSort={(f) => { if (shipmentSort === f) setShipmentSortDir(d => d === 'asc' ? 'desc' : 'asc'); else { setShipmentSort(f); setShipmentSortDir('desc'); } }} />
+                        </tr></thead>
+                        <tbody>{filteredShipments.slice(0, 200).map((s, i) => (
                         <tr key={i}>
                           <td style={tdStyle}>{s.date ? String(s.date).substring(0, 10) : '—'}</td>
                           <td style={{ ...tdStyle, color: COLORS.blue, fontWeight: 600 }}>{s.hs4}</td>
@@ -1366,9 +1480,10 @@ export default function ElectronicsResearch() {
                           <td style={tdStyle}>{s.tax_pct ? `${Number(s.tax_pct).toFixed(1)}%` : '—'}</td>
                         </tr>
                       ))}</tbody>
-                    </table>
-                    {filteredShipments.length > 200 && <div style={{ padding: '12px', textAlign: 'center', color: '#64748b', fontSize: '12px' }}>Showing 200 of {filteredShipments.length.toLocaleString()} records. Use HS4 filter to narrow down.</div>}
-                  </div>
+                      </table>
+                      {filteredShipments.length > 200 && <div style={{ padding: '12px', textAlign: 'center', color: '#64748b', fontSize: '12px' }}>Showing 200 of {filteredShipments.length.toLocaleString()} records. Use HS4 filter or other filters to narrow down.</div>}
+                    </div>
+                  </>
                 )}
               </div>
             )}
@@ -1379,14 +1494,35 @@ export default function ElectronicsResearch() {
                 {filteredBuyers.length === 0 ? (
                   <div style={{ textAlign: 'center', padding: '60px', color: '#94a3b8' }}>No buyer records{volzaHS4Filter ? ` for HS4 ${volzaHS4Filter}` : ''}. Buyer data is aggregated from shipment records.</div>
                 ) : (
-                  <div style={{ border: '1px solid rgba(148,163,184,0.08)', borderRadius: '12px', overflow: 'hidden', maxHeight: '700px', overflowY: 'auto' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
-                      <thead><tr>
-                        <th style={thStyle}>Company</th><th style={thStyle}>IEC</th><th style={thStyle}>Shipments</th><th style={thStyle}>Total CIF</th>
-                        <th style={thStyle}>Avg Rate</th><th style={thStyle}>HS Codes</th><th style={thStyle}>City</th><th style={thStyle}>State</th>
-                        <th style={thStyle}>China %</th><th style={thStyle}>Classification</th><th style={thStyle}>Shippers</th>
-                      </tr></thead>
-                      <tbody>{filteredBuyers.sort((a, b) => (b.total_cif_usd || 0) - (a.total_cif_usd || 0)).slice(0, 200).map((b, i) => (
+                  <>
+                    <div style={{ display: 'flex', gap: '12px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
+                      <input type="text" placeholder="Search company name..." value={buyerNameSearch} onChange={e => setBuyerNameSearch(e.target.value)}
+                        style={{ padding: '8px 12px', background: '#1a2035', border: '1px solid rgba(148,163,184,0.1)', borderRadius: '8px', color: '#e2e8f0', fontSize: '12px', outline: 'none', minWidth: '180px' }} />
+                      <select value={buyerClassFilter} onChange={e => setBuyerClassFilter(e.target.value)} style={{ padding: '8px 12px', background: '#1a2035', border: '1px solid rgba(148,163,184,0.1)', borderRadius: '8px', color: '#e2e8f0', fontSize: '12px', outline: 'none' }}>
+                        <option value="">All Classifications</option>
+                        <option value="MANUFACTURER">MANUFACTURER</option>
+                        <option value="TRADER">TRADER</option>
+                        <option value="UNKNOWN">UNKNOWN</option>
+                      </select>
+                      <input type="number" placeholder="China % Min" value={buyerChinaMin} onChange={e => setBuyerChinaMin(e.target.value)}
+                        style={{ padding: '8px 12px', background: '#1a2035', border: '1px solid rgba(148,163,184,0.1)', borderRadius: '8px', color: '#e2e8f0', fontSize: '12px', outline: 'none', width: '120px' }} />
+                      <input type="number" placeholder="China % Max" value={buyerChinaMax} onChange={e => setBuyerChinaMax(e.target.value)}
+                        style={{ padding: '8px 12px', background: '#1a2035', border: '1px solid rgba(148,163,184,0.1)', borderRadius: '8px', color: '#e2e8f0', fontSize: '12px', outline: 'none', width: '120px' }} />
+                      <span style={{ fontSize: '12px', color: '#64748b' }}>Showing {Math.min(filteredBuyers.length, 200)} of {filteredBuyers.length}</span>
+                    </div>
+                    <div style={{ border: '1px solid rgba(148,163,184,0.08)', borderRadius: '12px', overflow: 'hidden', maxHeight: '700px', overflowY: 'auto' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                        <thead><tr>
+                          <SortHeader label="Company" field="company_name" sortField={buyerSort} sortDir={buyerSortDir} onSort={(f) => { if (buyerSort === f) setBuyerSortDir(d => d === 'asc' ? 'desc' : 'asc'); else { setBuyerSort(f); setBuyerSortDir('desc'); } }} />
+                          <th style={thStyle}>IEC</th>
+                          <SortHeader label="Shipments" field="shipment_count" sortField={buyerSort} sortDir={buyerSortDir} onSort={(f) => { if (buyerSort === f) setBuyerSortDir(d => d === 'asc' ? 'desc' : 'asc'); else { setBuyerSort(f); setBuyerSortDir('desc'); } }} />
+                          <SortHeader label="Total CIF" field="total_cif_usd" sortField={buyerSort} sortDir={buyerSortDir} onSort={(f) => { if (buyerSort === f) setBuyerSortDir(d => d === 'asc' ? 'desc' : 'asc'); else { setBuyerSort(f); setBuyerSortDir('desc'); } }} />
+                          <SortHeader label="Avg Rate" field="avg_unit_rate" sortField={buyerSort} sortDir={buyerSortDir} onSort={(f) => { if (buyerSort === f) setBuyerSortDir(d => d === 'asc' ? 'desc' : 'asc'); else { setBuyerSort(f); setBuyerSortDir('desc'); } }} />
+                          <th style={thStyle}>HS Codes</th><th style={thStyle}>City</th><th style={thStyle}>State</th>
+                          <SortHeader label="China %" field="china_pct" sortField={buyerSort} sortDir={buyerSortDir} onSort={(f) => { if (buyerSort === f) setBuyerSortDir(d => d === 'asc' ? 'desc' : 'asc'); else { setBuyerSort(f); setBuyerSortDir('desc'); } }} />
+                          <th style={thStyle}>Classification</th><th style={thStyle}>Shippers</th>
+                        </tr></thead>
+                        <tbody>{filteredBuyers.slice(0, 200).map((b, i) => (
                         <tr key={i}>
                           <td style={{ ...tdStyle, fontWeight: 600, color: COLORS.blue, maxWidth: '180px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={b.company_name}>{b.company_name}</td>
                           <td style={tdStyle}>{b.iec || '—'}</td>
@@ -1403,7 +1539,8 @@ export default function ElectronicsResearch() {
                       ))}</tbody>
                     </table>
                     {filteredBuyers.length > 200 && <div style={{ padding: '12px', textAlign: 'center', color: '#64748b', fontSize: '12px' }}>Showing 200 of {filteredBuyers.length} buyer records.</div>}
-                  </div>
+                    </div>
+                  </>
                 )}
               </div>
             )}
@@ -1419,11 +1556,18 @@ export default function ElectronicsResearch() {
                   <div style={{ border: '1px solid rgba(148,163,184,0.08)', borderRadius: '12px', overflow: 'hidden' }}>
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
                       <thead><tr>
-                        <th style={thStyle}>HS4</th><th style={thStyle}>Scrape Date</th><th style={thStyle}>Shipments</th><th style={thStyle}>Pages</th>
-                        <th style={thStyle}>Buyers</th><th style={thStyle}>HHI</th><th style={thStyle}>Median CIF</th><th style={thStyle}>Avg CIF</th>
-                        <th style={thStyle}>Shippers</th><th style={thStyle}>China %</th><th style={thStyle}>Unit Rate</th><th style={thStyle}>Kill?</th>
+                        <SortHeader label="HS4" field="hs4" sortField={phase4Sort} sortDir={phase4SortDir} onSort={(f) => { if (phase4Sort === f) setPhase4SortDir(d => d === 'asc' ? 'desc' : 'asc'); else { setPhase4Sort(f); setPhase4SortDir('desc'); } }} />
+                        <th style={thStyle}>Scrape Date</th>
+                        <SortHeader label="Shipments" field="total_shipments" sortField={phase4Sort} sortDir={phase4SortDir} onSort={(f) => { if (phase4Sort === f) setPhase4SortDir(d => d === 'asc' ? 'desc' : 'asc'); else { setPhase4Sort(f); setPhase4SortDir('desc'); } }} />
+                        <th style={thStyle}>Pages</th>
+                        <SortHeader label="Buyers" field="unique_buyers" sortField={phase4Sort} sortDir={phase4SortDir} onSort={(f) => { if (phase4Sort === f) setPhase4SortDir(d => d === 'asc' ? 'desc' : 'asc'); else { setPhase4Sort(f); setPhase4SortDir('desc'); } }} />
+                        <SortHeader label="HHI" field="buyer_hhi" sortField={phase4Sort} sortDir={phase4SortDir} onSort={(f) => { if (phase4Sort === f) setPhase4SortDir(d => d === 'asc' ? 'desc' : 'asc'); else { setPhase4Sort(f); setPhase4SortDir('desc'); } }} />
+                        <th style={thStyle}>Median CIF</th><th style={thStyle}>Avg CIF</th>
+                        <th style={thStyle}>Shippers</th>
+                        <SortHeader label="China %" field="china_sourcing_pct" sortField={phase4Sort} sortDir={phase4SortDir} onSort={(f) => { if (phase4Sort === f) setPhase4SortDir(d => d === 'asc' ? 'desc' : 'asc'); else { setPhase4Sort(f); setPhase4SortDir('desc'); } }} />
+                        <th style={thStyle}>Unit Rate</th><th style={thStyle}>Kill?</th>
                       </tr></thead>
-                      <tbody>{p4Data.sort((a, b) => (b.total_shipments || 0) - (a.total_shipments || 0)).map(p => (
+                      <tbody>{sortedPhase4.map(p => (
                         <tr key={p.hs4}>
                           <td style={{ ...tdStyle, fontWeight: 700, color: COLORS.blue }}>{p.hs4}</td>
                           <td style={tdStyle}>{p.scrape_date || '—'}</td>
@@ -1450,6 +1594,94 @@ export default function ElectronicsResearch() {
                     <Metric label="China Sourcing" value="> 40%" color={COLORS.pass} sub="Alibaba supply validated" />
                   </div>
                 </Card>
+              </div>
+            )}
+
+            {/* SCRAPE QUEUE SUB-TAB */}
+            {volzaView === 'scrapequeue' && (
+              <div>
+                {(() => {
+                  const queueData = volzaQueue.map(q => {
+                    const codeData = codes.find(c => c.hs4 === q.hs4);
+                    return { ...q, commodity: codeData?.commodity, drill_score: codeData?.drill_score };
+                  });
+                  let sortedQueue = [...queueData].sort((a, b) => {
+                    let aVal = a[queueSort], bVal = b[queueSort];
+                    if (aVal == null && bVal == null) return 0;
+                    if (aVal == null) return 1;
+                    if (bVal == null) return -1;
+                    if (typeof aVal === 'number' && typeof bVal === 'number') {
+                      return queueSortDir === 'asc' ? aVal - bVal : bVal - aVal;
+                    }
+                    return queueSortDir === 'asc' ? String(aVal).localeCompare(String(bVal)) : String(bVal).localeCompare(String(aVal));
+                  });
+                  if (queueStatusFilter) {
+                    sortedQueue = sortedQueue.filter(q => (q.scrape_status || 'queued') === queueStatusFilter);
+                  }
+
+                  const queueStats = {
+                    total: queueData.length,
+                    completed: queueData.filter(q => q.scrape_status === 'completed').length,
+                    inProgress: queueData.filter(q => q.scrape_status === 'in_progress').length,
+                    queued: queueData.filter(q => q.scrape_status === 'queued').length,
+                  };
+
+                  return (
+                    <>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '16px', marginBottom: '24px' }}>
+                        <KPI label="Total Codes" value={queueStats.total} variant="blue" />
+                        <KPI label="Completed" value={queueStats.completed} variant="pass" sub={`${((queueStats.completed / queueStats.total) * 100 || 0).toFixed(0)}%`} />
+                        <KPI label="In Progress" value={queueStats.inProgress} variant="maybe" />
+                        <KPI label="Queued" value={queueStats.queued} variant="orange" sub="Pending scrape" />
+                      </div>
+
+                      {queueData.length === 0 ? (
+                        <div style={{ textAlign: 'center', padding: '60px', color: '#94a3b8' }}>
+                          No scrape queue data yet. Phase 4 Volza scraping will populate this list.
+                        </div>
+                      ) : (
+                        <>
+                          <div style={{ display: 'flex', gap: '12px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
+                            <select value={queueStatusFilter} onChange={e => setQueueStatusFilter(e.target.value)} style={{ padding: '8px 12px', background: '#1a2035', border: '1px solid rgba(148,163,184,0.1)', borderRadius: '8px', color: '#e2e8f0', fontSize: '12px', outline: 'none' }}>
+                              <option value="">All Statuses</option>
+                              <option value="completed">Completed</option>
+                              <option value="in_progress">In Progress</option>
+                              <option value="queued">Queued</option>
+                            </select>
+                            <span style={{ fontSize: '12px', color: '#64748b' }}>Showing {sortedQueue.length} of {queueData.length}</span>
+                          </div>
+                          <div style={{ border: '1px solid rgba(148,163,184,0.08)', borderRadius: '12px', overflow: 'hidden', maxHeight: '700px', overflowY: 'auto' }}>
+                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                              <thead><tr>
+                                <SortHeader label="Priority #" field="priority" sortField={queueSort} sortDir={queueSortDir} onSort={(f) => { if (queueSort === f) setQueueSortDir(d => d === 'asc' ? 'desc' : 'asc'); else { setQueueSort(f); setQueueSortDir('asc'); } }} />
+                                <th style={thStyle}>HS4</th>
+                                <th style={thStyle}>Commodity</th>
+                                <SortHeader label="Score" field="drill_score" sortField={queueSort} sortDir={queueSortDir} onSort={(f) => { if (queueSort === f) setQueueSortDir(d => d === 'asc' ? 'desc' : 'asc'); else { setQueueSort(f); setQueueSortDir('desc'); } }} />
+                                <th style={thStyle}>Status</th>
+                                <th style={thStyle}>Completed At</th>
+                              </tr></thead>
+                              <tbody>{sortedQueue.map((q, i) => {
+                                const status = q.scrape_status || 'queued';
+                                const statusColor = status === 'completed' ? COLORS.pass : status === 'in_progress' ? COLORS.maybe : '#94a3b8';
+                                const statusBg = status === 'completed' ? RGB.pass : status === 'in_progress' ? RGB.maybe : '#1e293b';
+                                return (
+                                  <tr key={q.hs4}>
+                                    <td style={tdStyle}>{q.priority || '—'}</td>
+                                    <td style={{ ...tdStyle, fontWeight: 700, color: COLORS.blue }}>{q.hs4}</td>
+                                    <td style={{ ...tdStyle, maxWidth: '300px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={q.commodity}>{q.commodity || '—'}</td>
+                                    <td style={{ ...tdStyle, fontWeight: 600 }}>{q.drill_score?.toFixed(0) || '—'}</td>
+                                    <td style={tdStyle}><span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 600, background: statusBg, color: statusColor, border: `1px solid ${statusColor}50`, textTransform: 'capitalize' }}>{status}</span></td>
+                                    <td style={tdStyle}>{q.completed_at ? String(q.completed_at).substring(0, 10) : '—'}</td>
+                                  </tr>
+                                );
+                              })}</tbody>
+                            </table>
+                          </div>
+                        </>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
             )}
           </div>
