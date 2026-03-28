@@ -350,7 +350,7 @@ export default function ElectronicsResearch() {
     { id: 'scoring', label: '⚡ 150-Point Scoring' },
     { id: 'regulatory', label: '🛡️ Regulatory Matrix' },
     { id: 'supply', label: '🏭 Supply vs Demand' },
-    { id: 'volza', label: `🚢 Volza Deep Dive (${volzaShipments.length})` },
+    { id: 'volza', label: `🚢 Volza Deep Dive (${volzaHS8Detail.reduce((a, h) => a + (h.shipment_count || 0), 0).toLocaleString()})` },
     { id: 'allcodes', label: '📋 All 180 Codes' },
     { id: 'queue', label: '📑 Research Queue' },
   ];
@@ -1242,7 +1242,8 @@ export default function ElectronicsResearch() {
         const shipments = volzaShipments;
         const buyers = volzaBuyers;
         const p4Data = phase4;
-        const hs4List = [...new Set(shipments.map(s => s.hs4).filter(Boolean))].sort();
+        // Build HS4 list from aggregated HS8 detail (not raw shipments which hit Supabase 1000-row limit)
+        const hs4List = [...new Set(volzaHS8Detail.map(h => h.hs4).filter(Boolean))].sort();
 
         // Filtered and sorted shipments
         let filteredShipments = volzaHS4Filter ? shipments.filter(s => s.hs4 === volzaHS4Filter) : shipments;
@@ -1309,14 +1310,19 @@ export default function ElectronicsResearch() {
           }
           return phase4SortDir === 'asc' ? String(aVal).localeCompare(String(bVal)) : String(bVal).localeCompare(String(aVal));
         });
-        const totalCIF = filteredShipments.reduce((a, s) => a + (Number(s.cif_value_usd) || 0), 0);
-        const uniqueConsignees = [...new Set(filteredShipments.map(s => s.consignee_name).filter(Boolean))].length;
-        const uniqueShippers = [...new Set(filteredShipments.map(s => s.shipper_name).filter(Boolean))].length;
+        // Use aggregated HS8 detail for accurate stats (raw shipments hit 1000-row Supabase limit)
+        const hs8Filtered = volzaHS4Filter ? volzaHS8Detail.filter(h => h.hs4 === volzaHS4Filter) : volzaHS8Detail;
+        const totalCIF = hs8Filtered.reduce((a, h) => a + (Number(h.total_cif_usd) || 0), 0);
+        const totalShipmentCount = hs8Filtered.reduce((a, h) => a + (h.shipment_count || 0), 0);
+        const uniqueConsignees = hs8Filtered.reduce((a, h) => a + (h.unique_buyers || 0), 0);
+        const uniqueShippers = hs8Filtered.reduce((a, h) => a + (h.unique_shippers || 0), 0);
+        // Build countries from HS8 detail country field
         const countries = {};
-        filteredShipments.forEach(s => { if (s.country_origin) countries[s.country_origin] = (countries[s.country_origin] || 0) + 1; });
+        hs8Filtered.forEach(h => { if (h.countries) { String(h.countries).split(',').forEach(c => { c = c.trim(); if (c) countries[c] = (countries[c] || 0) + (h.shipment_count || 1); }); } });
         const topCountries = Object.entries(countries).sort((a, b) => b[1] - a[1]).slice(0, 10);
+        // Build byHS4 from aggregated data
         const byHS4 = {};
-        shipments.forEach(s => { if (s.hs4) { if (!byHS4[s.hs4]) byHS4[s.hs4] = { count: 0, cif: 0 }; byHS4[s.hs4].count++; byHS4[s.hs4].cif += Number(s.cif_value_usd) || 0; } });
+        volzaHS8Detail.forEach(h => { if (h.hs4) { if (!byHS4[h.hs4]) byHS4[h.hs4] = { count: 0, cif: 0 }; byHS4[h.hs4].count += (h.shipment_count || 0); byHS4[h.hs4].cif += Number(h.total_cif_usd) || 0; } });
         const hs4Chart = Object.entries(byHS4).sort((a, b) => b[1].count - a[1].count).slice(0, 20).map(([k, v]) => ({ hs4: k, shipments: v.count, cif: v.cif }));
         const byMonth = {};
         filteredShipments.forEach(s => { if (s.date) { const m = String(s.date).substring(0, 7); byMonth[m] = (byMonth[m] || 0) + 1; } });
@@ -1347,7 +1353,7 @@ export default function ElectronicsResearch() {
 
             {/* KPI Row */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '16px', marginBottom: '24px' }}>
-              <KPI label="Total Shipments" value={filteredShipments.length.toLocaleString()} variant="blue" sub={hs4List.length + ' HS4 codes'} />
+              <KPI label="Total Shipments" value={totalShipmentCount.toLocaleString()} variant="blue" sub={hs4List.length + ' HS4 codes'} />
               <KPI label="Total CIF Value" value={`$${(totalCIF / 1e6).toFixed(2)}M`} variant="pass" />
               <KPI label="Unique Buyers" value={uniqueConsignees} variant="cyan" />
               <KPI label="Unique Shippers" value={uniqueShippers} variant="orange" />
@@ -1612,10 +1618,10 @@ export default function ElectronicsResearch() {
                 <div style={{ marginBottom: '16px', display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
                   <select value={selectedVolzaHS4} onChange={e => setSelectedVolzaHS4(e.target.value)} style={{ padding: '8px 12px', background: '#1a2035', border: '1px solid rgba(148,163,184,0.1)', borderRadius: '8px', color: '#e2e8f0', fontSize: '13px', outline: 'none', minWidth: '200px' }}>
                     <option value="">-- Select HS4 Code --</option>
-                    {[...new Set(volzaShipments.map(s => s.hs4).filter(Boolean))].sort().map(h4 => {
+                    {[...new Set(volzaHS8Detail.map(h => h.hs4).filter(Boolean))].sort().map(h4 => {
                       const codeInfo = codes.find(c => c.hs4 === h4);
-                      const shipCount = volzaShipments.filter(s => s.hs4 === h4).length;
-                      return <option key={h4} value={h4}>HS4 {h4} — {codeInfo?.commodity || 'Unknown'} ({shipCount} ships)</option>;
+                      const shipCount = volzaHS8Detail.filter(h => h.hs4 === h4).reduce((a, h) => a + (h.shipment_count || 0), 0);
+                      return <option key={h4} value={h4}>HS4 {h4} — {codeInfo?.commodity || 'Unknown'} ({shipCount.toLocaleString()} ships)</option>;
                     })}
                   </select>
                   <span style={{ fontSize: '12px', color: '#94a3b8' }}>
