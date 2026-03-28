@@ -340,6 +340,52 @@ export default function ElectronicsResearch() {
   const [analyticsPage, setAnalyticsPage] = useState(1);
   const ANALYTICS_PAGE_SIZE = 30;
 
+  // === Volza Deep Dive: Pre-compute all data + hooks at top level (Rules of Hooks) ===
+  const volzaComputed = useMemo(() => {
+    const p4Data = phase4;
+    const byHS4Agg = {};
+    volzaHS8Detail.forEach(h => { if (h.hs4) { if (!byHS4Agg[h.hs4]) byHS4Agg[h.hs4] = { shipments: 0, cif: 0, buyers: 0, shippers: 0, hs8Count: 0 }; byHS4Agg[h.hs4].shipments += (h.shipment_count || 0); byHS4Agg[h.hs4].cif += Number(h.total_cif_usd) || 0; byHS4Agg[h.hs4].buyers += (h.unique_buyers || 0); byHS4Agg[h.hs4].shippers += (h.unique_shippers || 0); byHS4Agg[h.hs4].hs8Count++; } });
+    const hs4List = Object.keys(byHS4Agg).sort();
+    const totalCIF = Object.values(byHS4Agg).reduce((a, v) => a + v.cif, 0);
+    const totalShipmentCount = Object.values(byHS4Agg).reduce((a, v) => a + v.shipments, 0);
+    const totalBuyerCount = Object.values(byHS4Agg).reduce((a, v) => a + v.buyers, 0);
+    const totalShipperCount = Object.values(byHS4Agg).reduce((a, v) => a + v.shippers, 0);
+    const countriesAgg = {};
+    volzaHS8Detail.forEach(h => { if (h.countries) String(h.countries).split(',').forEach(c => { c = c.trim(); if (c) countriesAgg[c] = (countriesAgg[c] || 0) + (h.shipment_count || 1); }); });
+    const topCountries = Object.entries(countriesAgg).sort((a, b) => b[1] - a[1]).slice(0, 10);
+    const hs4ChartData = Object.entries(byHS4Agg).sort((a, b) => b[1].shipments - a[1].shipments).slice(0, 20).map(([k, v]) => ({ hs4: k, shipments: v.shipments, cif: v.cif, cifM: v.cif / 1e6 }));
+    const unifiedCodes = hs4List.map(h4 => {
+      const code = codes.find(c => c.hs4 === h4) || {};
+      const sup = supply.find(s => s.hs4 === h4) || {};
+      const reg = regulatory.find(r => r.hs4 === h4) || {};
+      const dem = demand.find(d => d.hs4 === h4) || {};
+      const scr = scoring.find(s => s.hs4 === h4) || {};
+      const p4 = p4Data.find(p => p.hs4 === h4) || {};
+      const agg = byHS4Agg[h4] || {};
+      const buyerCount = volzaTopBuyers.filter(b => b.hs4 === h4).length;
+      return {
+        hs4: h4, commodity: code.commodity || '—', val_m: code.val_m || 0, drill_score: code.drill_score || 0,
+        trading_model: code.trading_model || 'UNASSIGNED', qa_status: code.qa_status || '—',
+        total_suppliers: sup.total_suppliers || 0, fob_low: sup.fob_lowest_usd, fob_high: sup.fob_highest_usd, fob_typical: sup.fob_typical_usd, gold_pct: sup.gold_supplier_pct || 0,
+        total_duty_pct: reg.total_duty_pct || 0, reg_risk: reg.regulatory_risk_score || '—', bis_qco: reg.check_bis_qco || 0, add_rate: reg.add_rate_pct || 0,
+        total_sellers: dem.total_sellers || 0, gross_margin_pct: dem.gross_margin_pct || 0, price_inr: dem.price_typical_inr, landed_cost: dem.landed_cost_inr,
+        v_shipments: agg.shipments || 0, v_cif: agg.cif || 0, v_buyers: buyerCount || agg.buyers || 0, v_shippers: agg.shippers || 0, v_hs8: agg.hs8Count || 0,
+        hhi: p4.buyer_hhi || null, china_pct: p4.china_sourcing_pct || null,
+        p5_score: scr.total_score || null, p5_verdict: scr.verdict || '—',
+      };
+    });
+    const queueDataForView = volzaQueue.map(q => { const cd = codes.find(c => c.hs4 === q.hs4); return { ...q, commodity: cd?.commodity, drill_score: cd?.drill_score }; });
+    return { p4Data, byHS4Agg, hs4List, totalCIF, totalShipmentCount, totalBuyerCount, totalShipperCount, topCountries, hs4ChartData, unifiedCodes, queueDataForView };
+  }, [volzaHS8Detail, volzaTopBuyers, volzaQueue, phase4, codes, supply, regulatory, demand, scoring]);
+
+  const matrixSF = useSortFilter(volzaComputed.unifiedCodes, 'v_shipments', 'desc');
+  const hs8ForView = selectedVolzaHS4 ? volzaHS8Detail.filter(h => h.hs4 === selectedVolzaHS4) : volzaHS8Detail;
+  const volzaHS8SF = useSortFilter(hs8ForView, 'shipment_count', 'desc');
+  const buyerDataForView = selectedVolzaHS4 ? volzaTopBuyers.filter(b => b.hs4 === selectedVolzaHS4) : volzaTopBuyers;
+  const volzaBuyersSF = useSortFilter(buyerDataForView, 'total_cif_usd', 'desc');
+  const volzaP4SF = useSortFilter(volzaComputed.p4Data, 'total_shipments', 'desc');
+  const volzaQSF = useSortFilter(volzaComputed.queueDataForView, 'priority', 'asc');
+
   const tabs = [
     { id: 'analytics', label: '🔍 Analytics Deep Dive' },
     { id: 'overview', label: '📊 Executive Overview' },
@@ -1238,48 +1284,11 @@ export default function ElectronicsResearch() {
 
       {/* ==================== TAB: VOLZA DEEP DIVE (v2 — Full Research Architecture) ==================== */}
       {activeTab === 'volza' && (() => {
-        const p4Data = phase4;
-        // Build aggregated stats from HS8 detail (NOT raw shipments — avoids Supabase 1000-row limit)
-        const byHS4Agg = {};
-        volzaHS8Detail.forEach(h => { if (h.hs4) { if (!byHS4Agg[h.hs4]) byHS4Agg[h.hs4] = { shipments: 0, cif: 0, buyers: 0, shippers: 0, hs8Count: 0 }; byHS4Agg[h.hs4].shipments += (h.shipment_count || 0); byHS4Agg[h.hs4].cif += Number(h.total_cif_usd) || 0; byHS4Agg[h.hs4].buyers += (h.unique_buyers || 0); byHS4Agg[h.hs4].shippers += (h.unique_shippers || 0); byHS4Agg[h.hs4].hs8Count++; } });
-        const hs4List = Object.keys(byHS4Agg).sort();
-        const totalCIF = Object.values(byHS4Agg).reduce((a, v) => a + v.cif, 0);
-        const totalShipmentCount = Object.values(byHS4Agg).reduce((a, v) => a + v.shipments, 0);
-        const totalBuyerCount = Object.values(byHS4Agg).reduce((a, v) => a + v.buyers, 0);
-        const totalShipperCount = Object.values(byHS4Agg).reduce((a, v) => a + v.shippers, 0);
-        // Build countries from HS8 detail
-        const countriesAgg = {};
-        volzaHS8Detail.forEach(h => { if (h.countries) String(h.countries).split(',').forEach(c => { c = c.trim(); if (c) countriesAgg[c] = (countriesAgg[c] || 0) + (h.shipment_count || 1); }); });
-        const topCountries = Object.entries(countriesAgg).sort((a, b) => b[1] - a[1]).slice(0, 10);
-        const hs4ChartData = Object.entries(byHS4Agg).sort((a, b) => b[1].shipments - a[1].shipments).slice(0, 20).map(([k, v]) => ({ hs4: k, shipments: v.shipments, cif: v.cif, cifM: v.cif / 1e6 }));
-
-        // ===== UNIFIED CODE MATRIX: merge ALL research tables per HS4 =====
-        const unifiedCodes = hs4List.map(h4 => {
-          const code = codes.find(c => c.hs4 === h4) || {};
-          const sup = supply.find(s => s.hs4 === h4) || {};
-          const reg = regulatory.find(r => r.hs4 === h4) || {};
-          const dem = demand.find(d => d.hs4 === h4) || {};
-          const scr = scoring.find(s => s.hs4 === h4) || {};
-          const p4 = p4Data.find(p => p.hs4 === h4) || {};
-          const agg = byHS4Agg[h4] || {};
-          const buyerCount = volzaTopBuyers.filter(b => b.hs4 === h4).length;
-          return {
-            hs4: h4, commodity: code.commodity || '—', val_m: code.val_m || 0, drill_score: code.drill_score || 0,
-            trading_model: code.trading_model || 'UNASSIGNED', qa_status: code.qa_status || '—',
-            // P2: Supply
-            total_suppliers: sup.total_suppliers || 0, fob_low: sup.fob_lowest_usd, fob_high: sup.fob_highest_usd, fob_typical: sup.fob_typical_usd, gold_pct: sup.gold_supplier_pct || 0,
-            // P2b: Regulatory
-            total_duty_pct: reg.total_duty_pct || 0, reg_risk: reg.regulatory_risk_score || '—', bis_qco: reg.check_bis_qco || 0, add_rate: reg.add_rate_pct || 0,
-            // P3: Demand
-            total_sellers: dem.total_sellers || 0, gross_margin_pct: dem.gross_margin_pct || 0, price_inr: dem.price_typical_inr, landed_cost: dem.landed_cost_inr,
-            // P4: Volza
-            v_shipments: agg.shipments || 0, v_cif: agg.cif || 0, v_buyers: buyerCount || agg.buyers || 0, v_shippers: agg.shippers || 0, v_hs8: agg.hs8Count || 0,
-            hhi: p4.buyer_hhi || null, china_pct: p4.china_sourcing_pct || null,
-            // P5: Score
-            p5_score: scr.total_score || null, p5_verdict: scr.verdict || '—',
-          };
-        });
-        const matrixSF = useSortFilter(unifiedCodes, 'v_shipments', 'desc');
+        const { p4Data, byHS4Agg, hs4List, totalCIF, totalShipmentCount, totalBuyerCount, totalShipperCount, topCountries, hs4ChartData, unifiedCodes, queueDataForView } = volzaComputed;
+        const hs8SF = volzaHS8SF;
+        const buyersSF = volzaBuyersSF;
+        const p4SF = volzaP4SF;
+        const qSF = volzaQSF;
 
         // Matrix filter state (reuse analyticsFilters for margin/model)
         const [matrixModelFilter, matrixRegFilter] = [analyticsFilters.tradingModel, analyticsFilters.regRisk];
@@ -1461,10 +1470,6 @@ export default function ElectronicsResearch() {
 
             {/* ===== HS8 ANALYSIS VIEW ===== */}
             {volzaView === 'hs8deep' && (() => {
-              const hs8SF = useSortFilter(
-                selectedVolzaHS4 ? volzaHS8Detail.filter(h => h.hs4 === selectedVolzaHS4) : volzaHS8Detail,
-                'shipment_count', 'desc'
-              );
               const hs8Data = hs8SF.sorted;
               const hs8Total = hs8Data.reduce((a, h) => a + (h.shipment_count || 0), 0);
               const hs8CIF = hs8Data.reduce((a, h) => a + (Number(h.total_cif_usd) || 0), 0);
@@ -1529,8 +1534,6 @@ export default function ElectronicsResearch() {
 
             {/* ===== BUYER INTELLIGENCE VIEW ===== */}
             {volzaView === 'buyers' && (() => {
-              const allBuyerData = selectedVolzaHS4 ? volzaTopBuyers.filter(b => b.hs4 === selectedVolzaHS4) : volzaTopBuyers;
-              const buyersSF = useSortFilter(allBuyerData, 'total_cif_usd', 'desc');
               return (
                 <div>
                   <div style={{ display: 'flex', gap: '12px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
@@ -1725,7 +1728,6 @@ export default function ElectronicsResearch() {
 
             {/* ===== PHASE 4 RESULTS VIEW ===== */}
             {volzaView === 'phase4' && (() => {
-              const p4SF = useSortFilter(p4Data, 'total_shipments', 'desc');
               return (
                 <div>
                   {p4Data.length === 0 ? (
@@ -1781,8 +1783,7 @@ export default function ElectronicsResearch() {
 
             {/* ===== SCRAPE QUEUE VIEW ===== */}
             {volzaView === 'queue' && (() => {
-              const queueData = volzaQueue.map(q => { const cd = codes.find(c => c.hs4 === q.hs4); return { ...q, commodity: cd?.commodity, drill_score: cd?.drill_score }; });
-              const qSF = useSortFilter(queueData, 'priority', 'asc');
+              const queueData = queueDataForView;
               let qFiltered = qSF.sorted;
               if (queueStatusFilter) qFiltered = qFiltered.filter(q => (q.scrape_status || 'queued') === queueStatusFilter);
               const qStats = { total: queueData.length, completed: queueData.filter(q => q.scrape_status === 'completed').length, inProgress: queueData.filter(q => q.scrape_status === 'in_progress').length, queued: queueData.filter(q => q.scrape_status === 'queued').length };
