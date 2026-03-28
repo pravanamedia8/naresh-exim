@@ -1236,628 +1236,606 @@ export default function ElectronicsResearch() {
         </div>
       )}
 
-      {/* ==================== TAB: VOLZA DEEP DIVE ==================== */}
+      {/* ==================== TAB: VOLZA DEEP DIVE (v2 — Full Research Architecture) ==================== */}
       {activeTab === 'volza' && (() => {
-        const shipments = volzaShipments;
-        const buyers = volzaBuyers;
         const p4Data = phase4;
-        // Build HS4 list from aggregated HS8 detail (not raw shipments which hit Supabase 1000-row limit)
-        const hs4List = [...new Set(volzaHS8Detail.map(h => h.hs4).filter(Boolean))].sort();
+        // Build aggregated stats from HS8 detail (NOT raw shipments — avoids Supabase 1000-row limit)
+        const byHS4Agg = {};
+        volzaHS8Detail.forEach(h => { if (h.hs4) { if (!byHS4Agg[h.hs4]) byHS4Agg[h.hs4] = { shipments: 0, cif: 0, buyers: 0, shippers: 0, hs8Count: 0 }; byHS4Agg[h.hs4].shipments += (h.shipment_count || 0); byHS4Agg[h.hs4].cif += Number(h.total_cif_usd) || 0; byHS4Agg[h.hs4].buyers += (h.unique_buyers || 0); byHS4Agg[h.hs4].shippers += (h.unique_shippers || 0); byHS4Agg[h.hs4].hs8Count++; } });
+        const hs4List = Object.keys(byHS4Agg).sort();
+        const totalCIF = Object.values(byHS4Agg).reduce((a, v) => a + v.cif, 0);
+        const totalShipmentCount = Object.values(byHS4Agg).reduce((a, v) => a + v.shipments, 0);
+        const totalBuyerCount = Object.values(byHS4Agg).reduce((a, v) => a + v.buyers, 0);
+        const totalShipperCount = Object.values(byHS4Agg).reduce((a, v) => a + v.shippers, 0);
+        // Build countries from HS8 detail
+        const countriesAgg = {};
+        volzaHS8Detail.forEach(h => { if (h.countries) String(h.countries).split(',').forEach(c => { c = c.trim(); if (c) countriesAgg[c] = (countriesAgg[c] || 0) + (h.shipment_count || 1); }); });
+        const topCountries = Object.entries(countriesAgg).sort((a, b) => b[1] - a[1]).slice(0, 10);
+        const hs4ChartData = Object.entries(byHS4Agg).sort((a, b) => b[1].shipments - a[1].shipments).slice(0, 20).map(([k, v]) => ({ hs4: k, shipments: v.shipments, cif: v.cif, cifM: v.cif / 1e6 }));
 
-        // Filtered and sorted shipments
-        let filteredShipments = volzaHS4Filter ? shipments.filter(s => s.hs4 === volzaHS4Filter) : shipments;
-        // Apply country filter
-        if (shipmentCountryFilter) filteredShipments = filteredShipments.filter(s => s.country_origin === shipmentCountryFilter);
-        // Apply date range filter
-        if (shipmentDateFrom) filteredShipments = filteredShipments.filter(s => s.date >= shipmentDateFrom);
-        if (shipmentDateTo) filteredShipments = filteredShipments.filter(s => s.date <= shipmentDateTo);
-        // Apply CIF range filter
-        if (shipmentCifMin) filteredShipments = filteredShipments.filter(s => (Number(s.cif_value_usd) || 0) >= Number(shipmentCifMin));
-        if (shipmentCifMax) filteredShipments = filteredShipments.filter(s => (Number(s.cif_value_usd) || 0) <= Number(shipmentCifMax));
-        // Apply consignee search
-        if (shipmentConsigneeSearch) {
-          const search = shipmentConsigneeSearch.toLowerCase();
-          filteredShipments = filteredShipments.filter(s =>
-            (s.consignee_name || '').toLowerCase().includes(search) ||
-            (s.shipper_name || '').toLowerCase().includes(search)
-          );
-        }
-        // Apply sorting to shipments
-        filteredShipments = [...filteredShipments].sort((a, b) => {
-          let aVal = a[shipmentSort], bVal = b[shipmentSort];
-          if (aVal == null && bVal == null) return 0;
-          if (aVal == null) return 1;
-          if (bVal == null) return -1;
-          if (typeof aVal === 'number' && typeof bVal === 'number') {
-            return shipmentSortDir === 'asc' ? aVal - bVal : bVal - aVal;
-          }
-          return shipmentSortDir === 'asc' ? String(aVal).localeCompare(String(bVal)) : String(bVal).localeCompare(String(aVal));
+        // ===== UNIFIED CODE MATRIX: merge ALL research tables per HS4 =====
+        const unifiedCodes = hs4List.map(h4 => {
+          const code = codes.find(c => c.hs4 === h4) || {};
+          const sup = supply.find(s => s.hs4 === h4) || {};
+          const reg = regulatory.find(r => r.hs4 === h4) || {};
+          const dem = demand.find(d => d.hs4 === h4) || {};
+          const scr = scoring.find(s => s.hs4 === h4) || {};
+          const p4 = p4Data.find(p => p.hs4 === h4) || {};
+          const agg = byHS4Agg[h4] || {};
+          const buyerCount = volzaTopBuyers.filter(b => b.hs4 === h4).length;
+          return {
+            hs4: h4, commodity: code.commodity || '—', val_m: code.val_m || 0, drill_score: code.drill_score || 0,
+            trading_model: code.trading_model || 'UNASSIGNED', qa_status: code.qa_status || '—',
+            // P2: Supply
+            total_suppliers: sup.total_suppliers || 0, fob_low: sup.fob_lowest_usd, fob_high: sup.fob_highest_usd, fob_typical: sup.fob_typical_usd, gold_pct: sup.gold_supplier_pct || 0,
+            // P2b: Regulatory
+            total_duty_pct: reg.total_duty_pct || 0, reg_risk: reg.regulatory_risk_score || '—', bis_qco: reg.check_bis_qco || 0, add_rate: reg.add_rate_pct || 0,
+            // P3: Demand
+            total_sellers: dem.total_sellers || 0, gross_margin_pct: dem.gross_margin_pct || 0, price_inr: dem.price_typical_inr, landed_cost: dem.landed_cost_inr,
+            // P4: Volza
+            v_shipments: agg.shipments || 0, v_cif: agg.cif || 0, v_buyers: buyerCount || agg.buyers || 0, v_shippers: agg.shippers || 0, v_hs8: agg.hs8Count || 0,
+            hhi: p4.buyer_hhi || null, china_pct: p4.china_sourcing_pct || null,
+            // P5: Score
+            p5_score: scr.total_score || null, p5_verdict: scr.verdict || '—',
+          };
         });
+        const matrixSF = useSortFilter(unifiedCodes, 'v_shipments', 'desc');
 
-        // Filtered and sorted buyers
-        let filteredBuyers = volzaHS4Filter ? buyers.filter(b => (b.hs_codes || '').includes(volzaHS4Filter)) : buyers;
-        // Apply classification filter
-        if (buyerClassFilter) filteredBuyers = filteredBuyers.filter(b => (b.classification || 'UNKNOWN') === buyerClassFilter);
-        // Apply name search
-        if (buyerNameSearch) {
-          const search = buyerNameSearch.toLowerCase();
-          filteredBuyers = filteredBuyers.filter(b => (b.company_name || '').toLowerCase().includes(search));
-        }
-        // Apply china % range filter
-        if (buyerChinaMin) filteredBuyers = filteredBuyers.filter(b => (Number(b.china_pct) || 0) >= Number(buyerChinaMin));
-        if (buyerChinaMax) filteredBuyers = filteredBuyers.filter(b => (Number(b.china_pct) || 0) <= Number(buyerChinaMax));
-        // Apply sorting to buyers
-        filteredBuyers = [...filteredBuyers].sort((a, b) => {
-          let aVal = a[buyerSort], bVal = b[buyerSort];
-          if (aVal == null && bVal == null) return 0;
-          if (aVal == null) return 1;
-          if (bVal == null) return -1;
-          if (typeof aVal === 'number' && typeof bVal === 'number') {
-            return buyerSortDir === 'asc' ? aVal - bVal : bVal - aVal;
-          }
-          return buyerSortDir === 'asc' ? String(aVal).localeCompare(String(bVal)) : String(bVal).localeCompare(String(aVal));
-        });
+        // Matrix filter state (reuse analyticsFilters for margin/model)
+        const [matrixModelFilter, matrixRegFilter] = [analyticsFilters.tradingModel, analyticsFilters.regRisk];
+        let matrixFiltered = matrixSF.sorted;
+        if (matrixModelFilter) matrixFiltered = matrixFiltered.filter(r => r.trading_model === matrixModelFilter);
+        if (matrixRegFilter) matrixFiltered = matrixFiltered.filter(r => r.reg_risk === matrixRegFilter);
 
-        // Sorted phase4 data
-        let sortedPhase4 = [...p4Data].sort((a, b) => {
-          let aVal = a[phase4Sort], bVal = b[phase4Sort];
-          if (aVal == null && bVal == null) return 0;
-          if (aVal == null) return 1;
-          if (bVal == null) return -1;
-          if (typeof aVal === 'number' && typeof bVal === 'number') {
-            return phase4SortDir === 'asc' ? aVal - bVal : bVal - aVal;
-          }
-          return phase4SortDir === 'asc' ? String(aVal).localeCompare(String(bVal)) : String(bVal).localeCompare(String(aVal));
-        });
-        // Use aggregated HS8 detail for accurate stats (raw shipments hit 1000-row Supabase limit)
-        const hs8Filtered = volzaHS4Filter ? volzaHS8Detail.filter(h => h.hs4 === volzaHS4Filter) : volzaHS8Detail;
-        const totalCIF = hs8Filtered.reduce((a, h) => a + (Number(h.total_cif_usd) || 0), 0);
-        const totalShipmentCount = hs8Filtered.reduce((a, h) => a + (h.shipment_count || 0), 0);
-        const uniqueConsignees = hs8Filtered.reduce((a, h) => a + (h.unique_buyers || 0), 0);
-        const uniqueShippers = hs8Filtered.reduce((a, h) => a + (h.unique_shippers || 0), 0);
-        // Build countries from HS8 detail country field
-        const countries = {};
-        hs8Filtered.forEach(h => { if (h.countries) { String(h.countries).split(',').forEach(c => { c = c.trim(); if (c) countries[c] = (countries[c] || 0) + (h.shipment_count || 1); }); } });
-        const topCountries = Object.entries(countries).sort((a, b) => b[1] - a[1]).slice(0, 10);
-        // Build byHS4 from aggregated data
-        const byHS4 = {};
-        volzaHS8Detail.forEach(h => { if (h.hs4) { if (!byHS4[h.hs4]) byHS4[h.hs4] = { count: 0, cif: 0 }; byHS4[h.hs4].count += (h.shipment_count || 0); byHS4[h.hs4].cif += Number(h.total_cif_usd) || 0; } });
-        const hs4Chart = Object.entries(byHS4).sort((a, b) => b[1].count - a[1].count).slice(0, 20).map(([k, v]) => ({ hs4: k, shipments: v.count, cif: v.cif }));
-        const byMonth = {};
-        filteredShipments.forEach(s => { if (s.date) { const m = String(s.date).substring(0, 7); byMonth[m] = (byMonth[m] || 0) + 1; } });
-        const monthChart = Object.entries(byMonth).sort().map(([k, v]) => ({ month: k, count: v }));
-        const topConsignees = {};
-        filteredShipments.forEach(s => { if (s.consignee_name) { if (!topConsignees[s.consignee_name]) topConsignees[s.consignee_name] = { count: 0, cif: 0 }; topConsignees[s.consignee_name].count++; topConsignees[s.consignee_name].cif += Number(s.cif_value_usd) || 0; } });
-        const topCons = Object.entries(topConsignees).sort((a, b) => b[1].cif - a[1].cif).slice(0, 15);
-        const topShippers = {};
-        filteredShipments.forEach(s => { if (s.shipper_name) { if (!topShippers[s.shipper_name]) topShippers[s.shipper_name] = { count: 0, cif: 0 }; topShippers[s.shipper_name].count++; topShippers[s.shipper_name].cif += Number(s.cif_value_usd) || 0; } });
-        const topShip = Object.entries(topShippers).sort((a, b) => b[1].cif - a[1].cif).slice(0, 15);
+        // HS4 selected for cross-ref
+        const xrefCode = selectedVolzaHS4;
+        const xrefData = xrefCode ? {
+          code: codes.find(c => c.hs4 === xrefCode) || {},
+          sup: supply.find(s => s.hs4 === xrefCode) || {},
+          reg: regulatory.find(r => r.hs4 === xrefCode) || {},
+          dem: demand.find(d => d.hs4 === xrefCode) || {},
+          scr: scoring.find(s => s.hs4 === xrefCode) || {},
+          p4: p4Data.find(p => p.hs4 === xrefCode) || {},
+          hs8: volzaHS8Detail.filter(h => h.hs4 === xrefCode),
+          buyers: volzaTopBuyers.filter(b => b.hs4 === xrefCode),
+        } : null;
+
+        const VOLZA_VIEWS = [
+          { key: 'dashboard', icon: '📊', label: 'Dashboard' },
+          { key: 'matrix', icon: '📋', label: 'Code Matrix' },
+          { key: 'hs8deep', icon: '🔬', label: 'HS8 Analysis' },
+          { key: 'buyers', icon: '👥', label: 'Buyer Intel' },
+          { key: 'xref', icon: '🔍', label: 'Research X-Ref' },
+          { key: 'phase4', icon: '📋', label: 'Phase 4' },
+          { key: 'queue', icon: '📑', label: 'Queue' },
+        ];
 
         return (
           <div>
+            {/* HEADER + NAV */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
-              <h2 style={{ fontSize: '20px', color: '#e2e8f0', margin: 0 }}>🚢 Volza Deep Dive — Import Shipment Intelligence</h2>
-              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                <select value={volzaHS4Filter} onChange={e => setVolzaHS4Filter(e.target.value)} style={{ padding: '8px 12px', background: '#1a2035', border: '1px solid rgba(148,163,184,0.1)', borderRadius: '8px', color: '#e2e8f0', fontSize: '13px' }}>
-                  <option value="">All HS4 Codes ({hs4List.length})</option>
-                  {hs4List.map(h => <option key={h} value={h}>HS4 {h} ({byHS4[h]?.count || 0} shipments)</option>)}
-                </select>
-                {['overview', 'shipments', 'buyers', 'hs8deep', 'topbuyers', 'phase4', 'scrapequeue'].map(v => (
-                  <button key={v} onClick={() => setVolzaView(v)} style={{ padding: '6px 14px', borderRadius: '8px', fontSize: '12px', fontWeight: volzaView === v ? 600 : 400, background: volzaView === v ? RGB.blue : 'transparent', color: volzaView === v ? COLORS.blue : '#94a3b8', border: `1px solid ${volzaView === v ? COLORS.blue + '50' : 'rgba(148,163,184,0.08)'}`, cursor: 'pointer' }}>
-                    {v === 'overview' ? '📊 Overview' : v === 'shipments' ? '🚢 Shipments' : v === 'buyers' ? '🎯 Buyers' : v === 'hs8deep' ? '🔬 HS8 Deep' : v === 'topbuyers' ? '👥 Top Buyers' : v === 'phase4' ? '📋 Phase 4' : '📑 Queue'}
+              <h2 style={{ fontSize: '20px', color: '#e2e8f0', margin: 0 }}>🚢 Volza Deep Dive — Full Research Intelligence</h2>
+              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                {VOLZA_VIEWS.map(v => (
+                  <button key={v.key} onClick={() => setVolzaView(v.key)} style={{ padding: '6px 14px', borderRadius: '8px', fontSize: '12px', fontWeight: volzaView === v.key ? 600 : 400, background: volzaView === v.key ? RGB.blue : 'transparent', color: volzaView === v.key ? COLORS.blue : '#94a3b8', border: `1px solid ${volzaView === v.key ? COLORS.blue + '50' : 'rgba(148,163,184,0.08)'}`, cursor: 'pointer' }}>
+                    {v.icon} {v.label}
                   </button>
                 ))}
               </div>
             </div>
 
-            {/* KPI Row */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '16px', marginBottom: '24px' }}>
-              <KPI label="Total Shipments" value={totalShipmentCount.toLocaleString()} variant="blue" sub={hs4List.length + ' HS4 codes'} />
+            {/* GLOBAL KPI ROW */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '14px', marginBottom: '24px' }}>
+              <KPI label="Total Shipments" value={totalShipmentCount.toLocaleString()} variant="blue" sub={`${hs4List.length} HS4 codes`} />
               <KPI label="Total CIF Value" value={`$${(totalCIF / 1e6).toFixed(2)}M`} variant="pass" />
-              <KPI label="Unique Buyers" value={uniqueConsignees} variant="cyan" />
-              <KPI label="Unique Shippers" value={uniqueShippers} variant="orange" />
-              <KPI label="P4 Completed" value={p4Data.filter(p => p.completed_at).length} variant="watch" sub={`of ${p4Data.length} started`} />
-              <KPI label="Buyer Records" value={filteredBuyers.length} variant="pass" sub="Aggregated from shipments" />
+              <KPI label="Unique Buyers" value={totalBuyerCount.toLocaleString()} variant="cyan" />
+              <KPI label="Unique Shippers" value={totalShipperCount.toLocaleString()} variant="orange" />
+              <KPI label="P4 Completed" value={p4Data.filter(p => p.completed_at).length} variant="watch" sub={`of ${volzaQueue.length} queued`} />
+              <KPI label="Avg Margin %" value={`${(unifiedCodes.reduce((a, c) => a + (c.gross_margin_pct || 0), 0) / (unifiedCodes.length || 1)).toFixed(1)}%`} variant="pass" sub="Across scraped codes" />
             </div>
 
-            {/* VOLZA OVERVIEW SUB-TAB */}
-            {volzaView === 'overview' && (<>
-              {shipments.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '60px', color: '#94a3b8' }}>
-                  No Volza shipment data yet. Data will appear here as Phase 4 Volza scraping progresses for QA-passed codes.
-                  <br /><br /><span style={{ fontSize: '13px' }}>Volza shipments are scraped using the KS4 v10 stealth scraper and imported via volza_importer.py</span>
-                </div>
+            {/* ===== DASHBOARD VIEW ===== */}
+            {volzaView === 'dashboard' && (
+              volzaHS8Detail.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '60px', color: '#94a3b8' }}>No Volza data yet. Data appears as Phase 4 scraping progresses.</div>
               ) : (<>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '24px' }}>
                   <Card title="Shipments by HS4 Code" emoji="📊">
                     <ResponsiveContainer width="100%" height={300}>
-                      <BarChart data={hs4Chart}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.1)" />
-                        <XAxis dataKey="hs4" stroke="#94a3b8" fontSize={11} />
-                        <YAxis stroke="#94a3b8" />
-                        <Tooltip contentStyle={tooltipStyle} />
-                        <Bar dataKey="shipments" fill={COLORS.blue} radius={[4, 4, 0, 0]} name="Shipments" />
-                      </BarChart>
+                      <BarChart data={hs4ChartData}><CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.1)" /><XAxis dataKey="hs4" stroke="#94a3b8" fontSize={11} /><YAxis stroke="#94a3b8" /><Tooltip contentStyle={tooltipStyle} /><Bar dataKey="shipments" fill={COLORS.blue} radius={[4, 4, 0, 0]} name="Shipments" /></BarChart>
                     </ResponsiveContainer>
                   </Card>
-                  <Card title="Country of Origin" emoji="🌍">
+                  <Card title="Country of Origin Distribution" emoji="🌍">
                     <ResponsiveContainer width="100%" height={300}>
-                      <PieChart>
-                        <Pie data={topCountries.map(([k, v]) => ({ name: k, value: v }))} cx="50%" cy="50%" innerRadius={50} outerRadius={110} paddingAngle={2} dataKey="value" label={({ name, value }) => `${name}: ${value}`}>
-                          {topCountries.map((_, i) => <Cell key={i} fill={[COLORS.blue, COLORS.cyan, COLORS.pass, COLORS.maybe, COLORS.watch, COLORS.orange, COLORS.drop, '#94a3b8', '#64748b', '#475569'][i % 10]} />)}
-                        </Pie>
-                        <Tooltip contentStyle={tooltipStyle} />
-                      </PieChart>
+                      <PieChart><Pie data={topCountries.map(([k, v]) => ({ name: k, value: v }))} cx="50%" cy="50%" innerRadius={50} outerRadius={110} paddingAngle={2} dataKey="value" label={({ name, value }) => `${name}: ${value}`}>{topCountries.map((_, i) => <Cell key={i} fill={[COLORS.blue, COLORS.cyan, COLORS.pass, COLORS.maybe, COLORS.watch, COLORS.orange, COLORS.drop, '#94a3b8', '#64748b', '#475569'][i % 10]} />)}</Pie><Tooltip contentStyle={tooltipStyle} /></PieChart>
                     </ResponsiveContainer>
                   </Card>
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '24px' }}>
-                  <Card title="Monthly Shipment Trend" emoji="📈">
+                  <Card title="CIF Value by HS4 ($M)" emoji="💰">
                     <ResponsiveContainer width="100%" height={250}>
-                      <BarChart data={monthChart}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.1)" />
-                        <XAxis dataKey="month" stroke="#94a3b8" fontSize={10} />
-                        <YAxis stroke="#94a3b8" />
-                        <Tooltip contentStyle={tooltipStyle} />
-                        <Bar dataKey="count" fill={COLORS.cyan} radius={[4, 4, 0, 0]} name="Shipments" />
-                      </BarChart>
+                      <BarChart data={hs4ChartData}><CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.1)" /><XAxis dataKey="hs4" stroke="#94a3b8" fontSize={11} /><YAxis stroke="#94a3b8" /><Tooltip contentStyle={tooltipStyle} formatter={v => `$${Number(v).toFixed(2)}M`} /><Bar dataKey="cifM" fill={COLORS.pass} radius={[4, 4, 0, 0]} name="CIF $M" /></BarChart>
                     </ResponsiveContainer>
                   </Card>
-                  <Card title="CIF Value by HS4" emoji="💰">
+                  <Card title="Trading Model Distribution" emoji="🏷️">
                     <ResponsiveContainer width="100%" height={250}>
-                      <BarChart data={hs4Chart.map(h => ({ ...h, cifK: h.cif / 1000 }))}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.1)" />
-                        <XAxis dataKey="hs4" stroke="#94a3b8" fontSize={11} />
-                        <YAxis stroke="#94a3b8" />
-                        <Tooltip contentStyle={tooltipStyle} formatter={v => `$${Number(v).toFixed(1)}K`} />
-                        <Bar dataKey="cifK" fill={COLORS.pass} radius={[4, 4, 0, 0]} name="CIF $K" />
-                      </BarChart>
+                      <PieChart><Pie data={Object.entries(unifiedCodes.reduce((a, c) => { const m = c.trading_model || 'UNASSIGNED'; a[m] = (a[m] || 0) + 1; return a; }, {})).map(([k, v]) => ({ name: k, value: v }))} cx="50%" cy="50%" innerRadius={40} outerRadius={90} paddingAngle={3} dataKey="value" label={({ name, value }) => `${name}: ${value}`}>{Object.keys(MODEL_COLORS).map((k, i) => <Cell key={i} fill={MODEL_COLORS[k]} />)}</Pie><Tooltip contentStyle={tooltipStyle} /></PieChart>
                     </ResponsiveContainer>
                   </Card>
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
-                  <Card title="Top 15 Buyers (by CIF)" emoji="🎯">
+                  <Card title="Top 15 Buyers (by CIF, all codes)" emoji="🎯">
                     <div style={{ maxHeight: '350px', overflowY: 'auto' }}>
                       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
-                        <thead><tr><th style={thStyle}>#</th><th style={thStyle}>Company</th><th style={thStyle}>Shipments</th><th style={thStyle}>Total CIF</th></tr></thead>
-                        <tbody>{topCons.map(([name, d], i) => (
-                          <tr key={name}><td style={tdStyle}>{i + 1}</td><td style={{ ...tdStyle, fontWeight: 600, color: COLORS.blue, maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={name}>{name}</td>
-                            <td style={tdStyle}>{d.count}</td><td style={{ ...tdStyle, fontWeight: 600 }}>${(d.cif / 1000).toFixed(1)}K</td></tr>
+                        <thead><tr><th style={thStyle}>#</th><th style={thStyle}>Company</th><th style={thStyle}>HS4</th><th style={thStyle}>Shipments</th><th style={thStyle}>Total CIF</th></tr></thead>
+                        <tbody>{[...volzaTopBuyers].sort((a, b) => (b.total_cif_usd || 0) - (a.total_cif_usd || 0)).slice(0, 15).map((b, i) => (
+                          <tr key={i}><td style={tdStyle}>{i + 1}</td><td style={{ ...tdStyle, fontWeight: 600, color: COLORS.cyan, maxWidth: '180px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={b.company_name}>{b.company_name}</td>
+                            <td style={{ ...tdStyle, color: COLORS.blue, fontWeight: 600 }}>{b.hs4}</td><td style={tdStyle}>{b.shipment_count}</td><td style={{ ...tdStyle, fontWeight: 600 }}>${((b.total_cif_usd || 0) / 1000).toFixed(1)}K</td></tr>
                         ))}</tbody>
                       </table>
                     </div>
                   </Card>
-                  <Card title="Top 15 Shippers (by CIF)" emoji="🏭">
-                    <div style={{ maxHeight: '350px', overflowY: 'auto' }}>
-                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
-                        <thead><tr><th style={thStyle}>#</th><th style={thStyle}>Company</th><th style={thStyle}>Shipments</th><th style={thStyle}>Total CIF</th></tr></thead>
-                        <tbody>{topShip.map(([name, d], i) => (
-                          <tr key={name}><td style={tdStyle}>{i + 1}</td><td style={{ ...tdStyle, fontWeight: 600, color: COLORS.orange, maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={name}>{name}</td>
-                            <td style={tdStyle}>{d.count}</td><td style={{ ...tdStyle, fontWeight: 600 }}>${(d.cif / 1000).toFixed(1)}K</td></tr>
-                        ))}</tbody>
-                      </table>
-                    </div>
+                  <Card title="Margin vs Score Overview" emoji="📈">
+                    <ResponsiveContainer width="100%" height={350}>
+                      <ScatterChart><CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.1)" />
+                        <XAxis type="number" dataKey="gross_margin_pct" name="Margin %" stroke="#94a3b8" fontSize={11} label={{ value: 'Gross Margin %', position: 'bottom', fill: '#64748b', fontSize: 11 }} />
+                        <YAxis type="number" dataKey="v_shipments" name="Shipments" stroke="#94a3b8" fontSize={11} label={{ value: 'Shipments', angle: -90, position: 'insideLeft', fill: '#64748b', fontSize: 11 }} />
+                        <ZAxis type="number" dataKey="v_cif" range={[40, 400]} name="CIF $" />
+                        <Tooltip contentStyle={tooltipStyle} formatter={(v, name) => name === 'CIF $' ? `$${(Number(v)/1e6).toFixed(2)}M` : v} labelFormatter={() => ''} />
+                        <Scatter data={unifiedCodes.filter(c => c.gross_margin_pct > 0 && c.v_shipments > 0)} fill={COLORS.blue} name="Codes">
+                          {unifiedCodes.filter(c => c.gross_margin_pct > 0 && c.v_shipments > 0).map((c, i) => <Cell key={i} fill={MODEL_COLORS[c.trading_model] || COLORS.blue} />)}
+                        </Scatter>
+                      </ScatterChart>
+                    </ResponsiveContainer>
                   </Card>
                 </div>
-              </>)}
-            </>)}
+              </>)
+            )}
 
-            {/* VOLZA SHIPMENTS SUB-TAB */}
-            {volzaView === 'shipments' && (
+            {/* ===== CODE MATRIX VIEW — Unified table merging ALL research phases ===== */}
+            {volzaView === 'matrix' && (
               <div>
-                {filteredShipments.length === 0 ? (
-                  <div style={{ textAlign: 'center', padding: '60px', color: '#94a3b8' }}>No shipment records{volzaHS4Filter ? ` for HS4 ${volzaHS4Filter}` : ''}. Data populates as Volza scraping progresses.</div>
-                ) : (
-                  <>
-                    <div style={{ display: 'flex', gap: '12px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
-                      <input type="text" placeholder="Search consignee/shipper..." value={shipmentConsigneeSearch} onChange={e => setShipmentConsigneeSearch(e.target.value)}
-                        style={{ padding: '8px 12px', background: '#1a2035', border: '1px solid rgba(148,163,184,0.1)', borderRadius: '8px', color: '#e2e8f0', fontSize: '12px', outline: 'none', minWidth: '180px' }} />
-                      <select value={shipmentCountryFilter} onChange={e => setShipmentCountryFilter(e.target.value)} style={{ padding: '8px 12px', background: '#1a2035', border: '1px solid rgba(148,163,184,0.1)', borderRadius: '8px', color: '#e2e8f0', fontSize: '12px', outline: 'none' }}>
-                        <option value="">All Countries</option>
-                        {[...new Set(shipments.map(s => s.country_origin).filter(Boolean))].sort().map(c => <option key={c} value={c}>{c}</option>)}
-                      </select>
-                      <input type="date" placeholder="Date From" value={shipmentDateFrom} onChange={e => setShipmentDateFrom(e.target.value)}
-                        style={{ padding: '8px 12px', background: '#1a2035', border: '1px solid rgba(148,163,184,0.1)', borderRadius: '8px', color: '#e2e8f0', fontSize: '12px', outline: 'none' }} />
-                      <input type="date" placeholder="Date To" value={shipmentDateTo} onChange={e => setShipmentDateTo(e.target.value)}
-                        style={{ padding: '8px 12px', background: '#1a2035', border: '1px solid rgba(148,163,184,0.1)', borderRadius: '8px', color: '#e2e8f0', fontSize: '12px', outline: 'none' }} />
-                      <input type="number" placeholder="CIF Min $" value={shipmentCifMin} onChange={e => setShipmentCifMin(e.target.value)}
-                        style={{ padding: '8px 12px', background: '#1a2035', border: '1px solid rgba(148,163,184,0.1)', borderRadius: '8px', color: '#e2e8f0', fontSize: '12px', outline: 'none', width: '120px' }} />
-                      <input type="number" placeholder="CIF Max $" value={shipmentCifMax} onChange={e => setShipmentCifMax(e.target.value)}
-                        style={{ padding: '8px 12px', background: '#1a2035', border: '1px solid rgba(148,163,184,0.1)', borderRadius: '8px', color: '#e2e8f0', fontSize: '12px', outline: 'none', width: '120px' }} />
-                      <span style={{ fontSize: '12px', color: '#64748b' }}>Showing {Math.min(filteredShipments.length, 200)} of {filteredShipments.length}</span>
-                    </div>
-                    <div style={{ border: '1px solid rgba(148,163,184,0.08)', borderRadius: '12px', overflow: 'hidden', maxHeight: '700px', overflowY: 'auto' }}>
-                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
-                        <thead><tr>
-                          <SortHeader label="Date" field="date" sortField={shipmentSort} sortDir={shipmentSortDir} onSort={(f) => { if (shipmentSort === f) setShipmentSortDir(d => d === 'asc' ? 'desc' : 'asc'); else { setShipmentSort(f); setShipmentSortDir('desc'); } }} />
-                          <th style={thStyle}>HS4</th><th style={thStyle}>HS Code</th><th style={thStyle}>Product</th>
-                          <th style={thStyle}>Consignee</th><th style={thStyle}>Shipper</th>
-                          <SortHeader label="CIF $" field="cif_value_usd" sortField={shipmentSort} sortDir={shipmentSortDir} onSort={(f) => { if (shipmentSort === f) setShipmentSortDir(d => d === 'asc' ? 'desc' : 'asc'); else { setShipmentSort(f); setShipmentSortDir('desc'); } }} />
-                          <SortHeader label="Unit Rate $" field="unit_rate_usd" sortField={shipmentSort} sortDir={shipmentSortDir} onSort={(f) => { if (shipmentSort === f) setShipmentSortDir(d => d === 'asc' ? 'desc' : 'asc'); else { setShipmentSort(f); setShipmentSortDir('desc'); } }} />
-                          <SortHeader label="Qty" field="std_qty" sortField={shipmentSort} sortDir={shipmentSortDir} onSort={(f) => { if (shipmentSort === f) setShipmentSortDir(d => d === 'asc' ? 'desc' : 'asc'); else { setShipmentSort(f); setShipmentSortDir('desc'); } }} />
-                          <th style={thStyle}>Origin</th><th style={thStyle}>City</th>
-                          <SortHeader label="Duty %" field="tax_pct" sortField={shipmentSort} sortDir={shipmentSortDir} onSort={(f) => { if (shipmentSort === f) setShipmentSortDir(d => d === 'asc' ? 'desc' : 'asc'); else { setShipmentSort(f); setShipmentSortDir('desc'); } }} />
-                        </tr></thead>
-                        <tbody>{filteredShipments.slice(0, 200).map((s, i) => (
-                        <tr key={i}>
-                          <td style={tdStyle}>{s.date ? String(s.date).substring(0, 10) : '—'}</td>
-                          <td style={{ ...tdStyle, color: COLORS.blue, fontWeight: 600 }}>{s.hs4}</td>
-                          <td style={tdStyle}>{s.hs_code}</td>
-                          <td style={{ ...tdStyle, maxWidth: '180px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={s.product_desc}>{s.product_desc}</td>
-                          <td style={{ ...tdStyle, maxWidth: '150px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: COLORS.cyan }} title={s.consignee_name}>{s.consignee_name}</td>
-                          <td style={{ ...tdStyle, maxWidth: '150px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: COLORS.orange }} title={s.shipper_name}>{s.shipper_name}</td>
-                          <td style={{ ...tdStyle, fontWeight: 600 }}>{s.cif_value_usd ? `$${Number(s.cif_value_usd).toLocaleString()}` : '—'}</td>
-                          <td style={tdStyle}>{s.unit_rate_usd ? `$${Number(s.unit_rate_usd).toFixed(2)}` : '—'}</td>
-                          <td style={tdStyle}>{s.std_qty ? Number(s.std_qty).toLocaleString() : '—'} {s.std_unit || ''}</td>
-                          <td style={tdStyle}>{s.country_origin || '—'}</td>
-                          <td style={tdStyle}>{s.consignee_city || '—'}</td>
-                          <td style={tdStyle}>{s.tax_pct ? `${Number(s.tax_pct).toFixed(1)}%` : '—'}</td>
+                <div style={{ display: 'flex', gap: '12px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
+                  <input type="text" placeholder="Search HS4, commodity..." value={matrixSF.search} onChange={e => matrixSF.setSearch(e.target.value)}
+                    style={{ padding: '8px 12px', background: '#1a2035', border: '1px solid rgba(148,163,184,0.1)', borderRadius: '8px', color: '#e2e8f0', fontSize: '12px', outline: 'none', minWidth: '200px' }} />
+                  <select value={analyticsFilters.tradingModel} onChange={e => setAnalyticsFilters(f => ({ ...f, tradingModel: e.target.value }))} style={{ padding: '8px 12px', background: '#1a2035', border: '1px solid rgba(148,163,184,0.1)', borderRadius: '8px', color: '#e2e8f0', fontSize: '12px' }}>
+                    <option value="">All Models</option>
+                    {['REGULAR', 'SPOT', 'BROKER', 'MIXED'].map(m => <option key={m} value={m}>{m}</option>)}
+                  </select>
+                  <select value={analyticsFilters.regRisk} onChange={e => setAnalyticsFilters(f => ({ ...f, regRisk: e.target.value }))} style={{ padding: '8px 12px', background: '#1a2035', border: '1px solid rgba(148,163,184,0.1)', borderRadius: '8px', color: '#e2e8f0', fontSize: '12px' }}>
+                    <option value="">All Reg Risk</option>
+                    {['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'].map(r => <option key={r} value={r}>{r}</option>)}
+                  </select>
+                  <span style={{ fontSize: '12px', color: '#64748b' }}>{matrixFiltered.length} codes with Volza data</span>
+                </div>
+                <div style={{ border: '1px solid rgba(148,163,184,0.08)', borderRadius: '12px', overflow: 'hidden', maxHeight: '750px', overflowY: 'auto', overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px', minWidth: '1400px' }}>
+                    <thead><tr>
+                      <SortHeader label="HS4" field="hs4" {...matrixSF} />
+                      <th style={{ ...thStyle, minWidth: '140px' }}>Commodity</th>
+                      <SortHeader label="Trade $M" field="val_m" {...matrixSF} />
+                      <th style={thStyle}>Model</th>
+                      <SortHeader label="P5 Score" field="p5_score" {...matrixSF} />
+                      <SortHeader label="Margin %" field="gross_margin_pct" {...matrixSF} />
+                      <SortHeader label="Duty %" field="total_duty_pct" {...matrixSF} />
+                      <th style={thStyle}>Reg Risk</th>
+                      <SortHeader label="Suppliers" field="total_suppliers" {...matrixSF} />
+                      <SortHeader label="FOB $" field="fob_typical" {...matrixSF} />
+                      <SortHeader label="Sellers" field="total_sellers" {...matrixSF} />
+                      <SortHeader label="Shipments" field="v_shipments" {...matrixSF} />
+                      <SortHeader label="CIF $M" field="v_cif" {...matrixSF} />
+                      <SortHeader label="Buyers" field="v_buyers" {...matrixSF} />
+                      <SortHeader label="HHI" field="hhi" {...matrixSF} />
+                      <SortHeader label="China %" field="china_pct" {...matrixSF} />
+                      <SortHeader label="HS8s" field="v_hs8" {...matrixSF} />
+                    </tr></thead>
+                    <tbody>{matrixFiltered.map((r, i) => {
+                      const m = r.gross_margin_pct || 0;
+                      return (
+                        <tr key={r.hs4} onClick={() => { setSelectedVolzaHS4(r.hs4); setVolzaView('xref'); }} style={{ cursor: 'pointer' }} onMouseEnter={e => e.currentTarget.style.background = 'rgba(96,165,250,0.04)'} onMouseLeave={e => e.currentTarget.style.background = i % 2 === 0 ? 'transparent' : 'rgba(96,165,250,0.02)'}>
+                          <td style={{ ...tdStyle, fontWeight: 700, color: COLORS.blue }}>{r.hs4}</td>
+                          <td style={{ ...tdStyle, maxWidth: '140px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.commodity}>{r.commodity}</td>
+                          <td style={{ ...tdStyle, fontWeight: 600 }}>${(r.val_m || 0).toFixed(1)}</td>
+                          <td style={tdStyle}><span style={{ color: MODEL_COLORS[r.trading_model] || '#94a3b8', fontWeight: 600, fontSize: '10px' }}>{r.trading_model}</span></td>
+                          <td style={{ ...tdStyle, fontWeight: 700, color: r.p5_score >= 120 ? COLORS.pass : r.p5_score >= 90 ? COLORS.maybe : r.p5_score ? COLORS.drop : '#64748b' }}>{r.p5_score || '—'}</td>
+                          <td style={{ ...tdStyle, fontWeight: 700, color: m > 20 ? COLORS.pass : m > 10 ? COLORS.maybe : COLORS.drop }}>{m > 0 ? `${m.toFixed(1)}%` : '—'}</td>
+                          <td style={tdStyle}>{r.total_duty_pct ? `${r.total_duty_pct.toFixed(1)}%` : '—'}</td>
+                          <td style={tdStyle}><Badge label={r.reg_risk || '—'} /></td>
+                          <td style={{ ...tdStyle, color: COLORS.blue }}>{r.total_suppliers || '—'}</td>
+                          <td style={tdStyle}>{r.fob_typical ? `$${r.fob_typical.toFixed(1)}` : '—'}</td>
+                          <td style={{ ...tdStyle, color: COLORS.pass }}>{r.total_sellers || '—'}</td>
+                          <td style={{ ...tdStyle, fontWeight: 600 }}>{r.v_shipments.toLocaleString()}</td>
+                          <td style={{ ...tdStyle, fontWeight: 600 }}>${(r.v_cif / 1e6).toFixed(2)}</td>
+                          <td style={tdStyle}>{r.v_buyers}</td>
+                          <td style={{ ...tdStyle, color: r.hhi && r.hhi < 2500 ? COLORS.pass : r.hhi ? COLORS.drop : '#64748b' }}>{r.hhi ? r.hhi.toFixed(0) : '—'}</td>
+                          <td style={{ ...tdStyle, color: r.china_pct && r.china_pct > 40 ? COLORS.pass : r.china_pct ? COLORS.maybe : '#64748b' }}>{r.china_pct ? `${r.china_pct.toFixed(0)}%` : '—'}</td>
+                          <td style={tdStyle}>{r.v_hs8}</td>
                         </tr>
-                      ))}</tbody>
-                      </table>
-                      {filteredShipments.length > 200 && <div style={{ padding: '12px', textAlign: 'center', color: '#64748b', fontSize: '12px' }}>Showing 200 of {filteredShipments.length.toLocaleString()} records. Use HS4 filter or other filters to narrow down.</div>}
-                    </div>
-                  </>
-                )}
+                      );
+                    })}</tbody>
+                  </table>
+                </div>
+                <div style={{ marginTop: '8px', fontSize: '11px', color: '#64748b' }}>Click any row to open Research Cross-Reference view for that code</div>
               </div>
             )}
 
-            {/* VOLZA BUYERS SUB-TAB */}
-            {volzaView === 'buyers' && (
-              <div>
-                {filteredBuyers.length === 0 ? (
-                  <div style={{ textAlign: 'center', padding: '60px', color: '#94a3b8' }}>No buyer records{volzaHS4Filter ? ` for HS4 ${volzaHS4Filter}` : ''}. Buyer data is aggregated from shipment records.</div>
-                ) : (
-                  <>
-                    <div style={{ display: 'flex', gap: '12px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
-                      <input type="text" placeholder="Search company name..." value={buyerNameSearch} onChange={e => setBuyerNameSearch(e.target.value)}
-                        style={{ padding: '8px 12px', background: '#1a2035', border: '1px solid rgba(148,163,184,0.1)', borderRadius: '8px', color: '#e2e8f0', fontSize: '12px', outline: 'none', minWidth: '180px' }} />
-                      <select value={buyerClassFilter} onChange={e => setBuyerClassFilter(e.target.value)} style={{ padding: '8px 12px', background: '#1a2035', border: '1px solid rgba(148,163,184,0.1)', borderRadius: '8px', color: '#e2e8f0', fontSize: '12px', outline: 'none' }}>
-                        <option value="">All Classifications</option>
-                        <option value="MANUFACTURER">MANUFACTURER</option>
-                        <option value="TRADER">TRADER</option>
-                        <option value="UNKNOWN">UNKNOWN</option>
-                      </select>
-                      <input type="number" placeholder="China % Min" value={buyerChinaMin} onChange={e => setBuyerChinaMin(e.target.value)}
-                        style={{ padding: '8px 12px', background: '#1a2035', border: '1px solid rgba(148,163,184,0.1)', borderRadius: '8px', color: '#e2e8f0', fontSize: '12px', outline: 'none', width: '120px' }} />
-                      <input type="number" placeholder="China % Max" value={buyerChinaMax} onChange={e => setBuyerChinaMax(e.target.value)}
-                        style={{ padding: '8px 12px', background: '#1a2035', border: '1px solid rgba(148,163,184,0.1)', borderRadius: '8px', color: '#e2e8f0', fontSize: '12px', outline: 'none', width: '120px' }} />
-                      <span style={{ fontSize: '12px', color: '#64748b' }}>Showing {Math.min(filteredBuyers.length, 200)} of {filteredBuyers.length}</span>
-                    </div>
-                    <div style={{ border: '1px solid rgba(148,163,184,0.08)', borderRadius: '12px', overflow: 'hidden', maxHeight: '700px', overflowY: 'auto' }}>
-                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
-                        <thead><tr>
-                          <SortHeader label="Company" field="company_name" sortField={buyerSort} sortDir={buyerSortDir} onSort={(f) => { if (buyerSort === f) setBuyerSortDir(d => d === 'asc' ? 'desc' : 'asc'); else { setBuyerSort(f); setBuyerSortDir('desc'); } }} />
-                          <th style={thStyle}>IEC</th>
-                          <SortHeader label="Shipments" field="shipment_count" sortField={buyerSort} sortDir={buyerSortDir} onSort={(f) => { if (buyerSort === f) setBuyerSortDir(d => d === 'asc' ? 'desc' : 'asc'); else { setBuyerSort(f); setBuyerSortDir('desc'); } }} />
-                          <SortHeader label="Total CIF" field="total_cif_usd" sortField={buyerSort} sortDir={buyerSortDir} onSort={(f) => { if (buyerSort === f) setBuyerSortDir(d => d === 'asc' ? 'desc' : 'asc'); else { setBuyerSort(f); setBuyerSortDir('desc'); } }} />
-                          <SortHeader label="Avg Rate" field="avg_unit_rate" sortField={buyerSort} sortDir={buyerSortDir} onSort={(f) => { if (buyerSort === f) setBuyerSortDir(d => d === 'asc' ? 'desc' : 'asc'); else { setBuyerSort(f); setBuyerSortDir('desc'); } }} />
-                          <th style={thStyle}>HS Codes</th><th style={thStyle}>City</th><th style={thStyle}>State</th>
-                          <SortHeader label="China %" field="china_pct" sortField={buyerSort} sortDir={buyerSortDir} onSort={(f) => { if (buyerSort === f) setBuyerSortDir(d => d === 'asc' ? 'desc' : 'asc'); else { setBuyerSort(f); setBuyerSortDir('desc'); } }} />
-                          <th style={thStyle}>Classification</th><th style={thStyle}>Shippers</th>
-                        </tr></thead>
-                        <tbody>{filteredBuyers.slice(0, 200).map((b, i) => (
-                        <tr key={i}>
-                          <td style={{ ...tdStyle, fontWeight: 600, color: COLORS.blue, maxWidth: '180px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={b.company_name}>{b.company_name}</td>
-                          <td style={tdStyle}>{b.iec || '—'}</td>
-                          <td style={{ ...tdStyle, fontWeight: 600 }}>{b.shipment_count || 0}</td>
-                          <td style={{ ...tdStyle, fontWeight: 600, color: COLORS.pass }}>{b.total_cif_usd ? `$${(Number(b.total_cif_usd) / 1000).toFixed(1)}K` : '—'}</td>
-                          <td style={tdStyle}>{b.avg_unit_rate ? `$${Number(b.avg_unit_rate).toFixed(2)}` : '—'}</td>
-                          <td style={{ ...tdStyle, maxWidth: '100px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={b.hs_codes}>{b.hs_codes || '—'}</td>
-                          <td style={tdStyle}>{b.city || '—'}</td>
-                          <td style={tdStyle}>{b.state || '—'}</td>
-                          <td style={{ ...tdStyle, color: (b.china_pct || 0) > 50 ? COLORS.drop : (b.china_pct || 0) > 20 ? COLORS.maybe : COLORS.pass }}>{b.china_pct ? `${Number(b.china_pct).toFixed(0)}%` : '—'}</td>
-                          <td style={tdStyle}><Badge label={b.classification || 'UNKNOWN'} /></td>
-                          <td style={tdStyle}>{b.shipper_count || 0}</td>
-                        </tr>
-                      ))}</tbody>
-                    </table>
-                    {filteredBuyers.length > 200 && <div style={{ padding: '12px', textAlign: 'center', color: '#64748b', fontSize: '12px' }}>Showing 200 of {filteredBuyers.length} buyer records.</div>}
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
+            {/* ===== HS8 ANALYSIS VIEW ===== */}
+            {volzaView === 'hs8deep' && (() => {
+              const hs8SF = useSortFilter(
+                selectedVolzaHS4 ? volzaHS8Detail.filter(h => h.hs4 === selectedVolzaHS4) : volzaHS8Detail,
+                'shipment_count', 'desc'
+              );
+              const hs8Data = hs8SF.sorted;
+              const hs8Total = hs8Data.reduce((a, h) => a + (h.shipment_count || 0), 0);
+              const hs8CIF = hs8Data.reduce((a, h) => a + (Number(h.total_cif_usd) || 0), 0);
 
-            {/* PHASE 4 RESULTS SUB-TAB */}
-            {volzaView === 'phase4' && (
-              <div>
-                {p4Data.length === 0 ? (
-                  <div style={{ textAlign: 'center', padding: '60px', color: '#94a3b8' }}>
-                    No Phase 4 validation results yet. Phase 4 runs after QA Gate passes — it scrapes Volza shipment data and validates buyer distribution, CIF ranges, and sourcing patterns.
+              return (
+                <div>
+                  <div style={{ display: 'flex', gap: '12px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
+                    <select value={selectedVolzaHS4 || ''} onChange={e => setSelectedVolzaHS4(e.target.value || null)} style={{ padding: '8px 12px', background: '#1a2035', border: '1px solid rgba(148,163,184,0.1)', borderRadius: '8px', color: '#e2e8f0', fontSize: '13px', minWidth: '250px' }}>
+                      <option value="">All HS4 Codes ({hs4List.length})</option>
+                      {hs4List.map(h4 => { const info = codes.find(c => c.hs4 === h4); return <option key={h4} value={h4}>HS4 {h4} — {info?.commodity || ''} ({(byHS4Agg[h4]?.shipments || 0).toLocaleString()})</option>; })}
+                    </select>
+                    <input type="text" placeholder="Search HS8, product..." value={hs8SF.search} onChange={e => hs8SF.setSearch(e.target.value)}
+                      style={{ padding: '8px 12px', background: '#1a2035', border: '1px solid rgba(148,163,184,0.1)', borderRadius: '8px', color: '#e2e8f0', fontSize: '12px', flex: 1, minWidth: '200px' }} />
+                    <span style={{ fontSize: '12px', color: '#64748b' }}>{hs8Data.length} HS8 codes | {hs8Total.toLocaleString()} shipments | ${(hs8CIF / 1e6).toFixed(2)}M CIF</span>
                   </div>
-                ) : (
-                  <div style={{ border: '1px solid rgba(148,163,184,0.08)', borderRadius: '12px', overflow: 'hidden' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '12px', marginBottom: '20px' }}>
+                    <Metric label="HS8 Sub-codes" value={hs8Data.length} color={COLORS.blue} />
+                    <Metric label="Total Shipments" value={hs8Total.toLocaleString()} color={COLORS.cyan} />
+                    <Metric label="Total CIF" value={`$${(hs8CIF / 1e6).toFixed(2)}M`} color={COLORS.pass} />
+                    <Metric label="Avg Unit Rate" value={hs8Data.length > 0 ? `$${(hs8Data.reduce((a, h) => a + (h.avg_unit_rate_usd || 0), 0) / hs8Data.length).toFixed(2)}` : '—'} color={COLORS.watch} />
+                    <Metric label="Avg China %" value={hs8Data.length > 0 ? `${(hs8Data.reduce((a, h) => a + (h.china_pct || 0), 0) / hs8Data.length).toFixed(1)}%` : '—'} color={COLORS.maybe} />
+                  </div>
+                  <div style={{ border: '1px solid rgba(148,163,184,0.08)', borderRadius: '12px', overflow: 'hidden', maxHeight: '700px', overflowY: 'auto' }}>
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
                       <thead><tr>
-                        <SortHeader label="HS4" field="hs4" sortField={phase4Sort} sortDir={phase4SortDir} onSort={(f) => { if (phase4Sort === f) setPhase4SortDir(d => d === 'asc' ? 'desc' : 'asc'); else { setPhase4Sort(f); setPhase4SortDir('desc'); } }} />
-                        <th style={thStyle}>Scrape Date</th>
-                        <SortHeader label="Shipments" field="total_shipments" sortField={phase4Sort} sortDir={phase4SortDir} onSort={(f) => { if (phase4Sort === f) setPhase4SortDir(d => d === 'asc' ? 'desc' : 'asc'); else { setPhase4Sort(f); setPhase4SortDir('desc'); } }} />
-                        <th style={thStyle}>Pages</th>
-                        <SortHeader label="Buyers" field="unique_buyers" sortField={phase4Sort} sortDir={phase4SortDir} onSort={(f) => { if (phase4Sort === f) setPhase4SortDir(d => d === 'asc' ? 'desc' : 'asc'); else { setPhase4Sort(f); setPhase4SortDir('desc'); } }} />
-                        <SortHeader label="HHI" field="buyer_hhi" sortField={phase4Sort} sortDir={phase4SortDir} onSort={(f) => { if (phase4Sort === f) setPhase4SortDir(d => d === 'asc' ? 'desc' : 'asc'); else { setPhase4Sort(f); setPhase4SortDir('desc'); } }} />
-                        <th style={thStyle}>Median CIF</th><th style={thStyle}>Avg CIF</th>
-                        <th style={thStyle}>Shippers</th>
-                        <SortHeader label="China %" field="china_sourcing_pct" sortField={phase4Sort} sortDir={phase4SortDir} onSort={(f) => { if (phase4Sort === f) setPhase4SortDir(d => d === 'asc' ? 'desc' : 'asc'); else { setPhase4Sort(f); setPhase4SortDir('desc'); } }} />
-                        <th style={thStyle}>Unit Rate</th><th style={thStyle}>Kill?</th>
+                        <SortHeader label="HS4" field="hs4" {...hs8SF} />
+                        <SortHeader label="HS8" field="hs8_code" {...hs8SF} />
+                        <th style={{ ...thStyle, maxWidth: '220px' }}>Product</th>
+                        <SortHeader label="Shipments" field="shipment_count" {...hs8SF} />
+                        <SortHeader label="Buyers" field="unique_buyers" {...hs8SF} />
+                        <SortHeader label="Shippers" field="unique_shippers" {...hs8SF} />
+                        <SortHeader label="Total CIF $" field="total_cif_usd" {...hs8SF} />
+                        <SortHeader label="Avg CIF $" field="avg_cif_usd" {...hs8SF} />
+                        <SortHeader label="Unit Rate $" field="avg_unit_rate_usd" {...hs8SF} />
+                        <SortHeader label="Min Rate $" field="min_unit_rate" {...hs8SF} />
+                        <SortHeader label="Max Rate $" field="max_unit_rate" {...hs8SF} />
+                        <SortHeader label="China %" field="china_pct" {...hs8SF} />
+                        <th style={thStyle}>Date Range</th>
                       </tr></thead>
-                      <tbody>{sortedPhase4.map(p => (
-                        <tr key={p.hs4}>
-                          <td style={{ ...tdStyle, fontWeight: 700, color: COLORS.blue }}>{p.hs4}</td>
-                          <td style={tdStyle}>{p.scrape_date || '—'}</td>
-                          <td style={{ ...tdStyle, fontWeight: 600 }}>{(p.total_shipments || 0).toLocaleString()}</td>
-                          <td style={tdStyle}>{p.total_pages || '—'}</td>
-                          <td style={{ ...tdStyle, color: (p.unique_buyers || 0) > 20 ? COLORS.pass : COLORS.maybe }}>{p.unique_buyers || 0}</td>
-                          <td style={{ ...tdStyle, color: (p.buyer_hhi || 0) < 2500 ? COLORS.pass : COLORS.drop }}>{p.buyer_hhi?.toFixed(0) || '—'}</td>
-                          <td style={tdStyle}>{p.median_cif_usd ? `$${p.median_cif_usd.toFixed(0)}` : '—'}</td>
-                          <td style={tdStyle}>{p.avg_cif_usd ? `$${p.avg_cif_usd.toFixed(0)}` : '—'}</td>
-                          <td style={tdStyle}>{p.unique_shippers || 0}</td>
-                          <td style={{ ...tdStyle, color: (p.china_sourcing_pct || 0) > 40 ? COLORS.pass : COLORS.maybe }}>{p.china_sourcing_pct ? `${p.china_sourcing_pct.toFixed(0)}%` : '—'}</td>
-                          <td style={tdStyle}>{p.volza_avg_unit_rate ? `$${p.volza_avg_unit_rate.toFixed(2)}` : '—'}</td>
-                          <td style={tdStyle}>{p.kill_signal ? <span style={{ color: COLORS.drop }}>KILL: {p.kill_reason}</span> : <span style={{ color: COLORS.pass }}>PASS</span>}</td>
+                      <tbody>{hs8Data.map((h, i) => (
+                        <tr key={i} style={{ background: i % 2 === 0 ? 'transparent' : 'rgba(96,165,250,0.02)' }} onMouseEnter={e => e.currentTarget.style.background = 'rgba(96,165,250,0.04)'} onMouseLeave={e => e.currentTarget.style.background = i % 2 === 0 ? 'transparent' : 'rgba(96,165,250,0.02)'}>
+                          <td style={{ ...tdStyle, color: COLORS.blue, fontWeight: 600 }}>{h.hs4}</td>
+                          <td style={{ ...tdStyle, fontWeight: 700, color: COLORS.cyan }}>{h.hs8_code}</td>
+                          <td style={{ ...tdStyle, maxWidth: '220px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={h.product_desc}>{h.product_desc}</td>
+                          <td style={{ ...tdStyle, fontWeight: 600 }}>{h.shipment_count?.toLocaleString() || '—'}</td>
+                          <td style={tdStyle}>{h.unique_buyers || '—'}</td>
+                          <td style={tdStyle}>{h.unique_shippers || '—'}</td>
+                          <td style={{ ...tdStyle, fontWeight: 600 }}>${((h.total_cif_usd || 0) / 1000).toFixed(1)}K</td>
+                          <td style={tdStyle}>${(h.avg_cif_usd || 0).toFixed(0)}</td>
+                          <td style={tdStyle}>${(h.avg_unit_rate_usd || 0).toFixed(2)}</td>
+                          <td style={tdStyle}>{h.min_unit_rate ? `$${h.min_unit_rate.toFixed(2)}` : '—'}</td>
+                          <td style={tdStyle}>{h.max_unit_rate ? `$${h.max_unit_rate.toFixed(2)}` : '—'}</td>
+                          <td style={{ ...tdStyle, color: (h.china_pct || 0) > 70 ? COLORS.maybe : (h.china_pct || 0) > 40 ? COLORS.pass : COLORS.watch, fontWeight: 600 }}>{(h.china_pct || 0).toFixed(0)}%</td>
+                          <td style={{ ...tdStyle, fontSize: '10px', color: '#64748b', whiteSpace: 'nowrap' }}>{h.first_date ? String(h.first_date).substring(0, 10) : '—'} → {h.last_date ? String(h.last_date).substring(0, 10) : '—'}</td>
                         </tr>
                       ))}</tbody>
                     </table>
                   </div>
-                )}
-                <Card title="Phase 4 Validation Thresholds" emoji="📋" style={{ marginTop: '20px' }}>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
-                    <Metric label="Buyer HHI" value="< 2,500" color={COLORS.pass} sub="Distributed market = GOOD" />
-                    <Metric label="Unique Buyers" value="> 20" color={COLORS.pass} sub="Sufficient buyer pool" />
-                    <Metric label="Median CIF" value="$5K-$100K" color={COLORS.pass} sub="Trader-friendly range" />
-                    <Metric label="China Sourcing" value="> 40%" color={COLORS.pass} sub="Alibaba supply validated" />
-                  </div>
-                </Card>
-              </div>
-            )}
+                </div>
+              );
+            })()}
 
-            {/* HS8 DEEP DIVE SUB-TAB */}
-            {volzaView === 'hs8deep' && (
+            {/* ===== BUYER INTELLIGENCE VIEW ===== */}
+            {volzaView === 'buyers' && (() => {
+              const allBuyerData = selectedVolzaHS4 ? volzaTopBuyers.filter(b => b.hs4 === selectedVolzaHS4) : volzaTopBuyers;
+              const buyersSF = useSortFilter(allBuyerData, 'total_cif_usd', 'desc');
+              return (
+                <div>
+                  <div style={{ display: 'flex', gap: '12px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
+                    <select value={selectedVolzaHS4 || ''} onChange={e => setSelectedVolzaHS4(e.target.value || null)} style={{ padding: '8px 12px', background: '#1a2035', border: '1px solid rgba(148,163,184,0.1)', borderRadius: '8px', color: '#e2e8f0', fontSize: '13px', minWidth: '250px' }}>
+                      <option value="">All HS4 Codes</option>
+                      {hs4List.map(h4 => { const ct = volzaTopBuyers.filter(b => b.hs4 === h4).length; return <option key={h4} value={h4}>HS4 {h4} ({ct} buyers)</option>; })}
+                    </select>
+                    <input type="text" placeholder="Search company, IEC, city..." value={buyersSF.search} onChange={e => buyersSF.setSearch(e.target.value)}
+                      style={{ padding: '8px 12px', background: '#1a2035', border: '1px solid rgba(148,163,184,0.1)', borderRadius: '8px', color: '#e2e8f0', fontSize: '12px', flex: 1, minWidth: '200px' }} />
+                    <span style={{ fontSize: '12px', color: '#64748b' }}>{buyersSF.sorted.length} buyers</span>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '12px', marginBottom: '20px' }}>
+                    <Metric label="Total Buyers" value={buyersSF.sorted.length} color={COLORS.blue} />
+                    <Metric label="Total CIF" value={`$${(buyersSF.sorted.reduce((a, b) => a + (b.total_cif_usd || 0), 0) / 1e6).toFixed(2)}M`} color={COLORS.pass} />
+                    <Metric label="Avg Shipments/Buyer" value={(buyersSF.sorted.reduce((a, b) => a + (b.shipment_count || 0), 0) / (buyersSF.sorted.length || 1)).toFixed(1)} color={COLORS.cyan} />
+                    <Metric label="Avg China %" value={`${(buyersSF.sorted.reduce((a, b) => a + (b.china_pct || 0), 0) / (buyersSF.sorted.length || 1)).toFixed(0)}%`} color={COLORS.maybe} />
+                  </div>
+                  <div style={{ border: '1px solid rgba(148,163,184,0.08)', borderRadius: '12px', overflow: 'hidden', maxHeight: '700px', overflowY: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                      <thead><tr>
+                        <SortHeader label="Rank" field="rank_in_hs4" {...buyersSF} />
+                        <SortHeader label="Company" field="company_name" {...buyersSF} style={{ minWidth: '180px' }} />
+                        <th style={thStyle}>HS4</th>
+                        <th style={thStyle}>IEC</th>
+                        <th style={thStyle}>City</th>
+                        <th style={thStyle}>State</th>
+                        <SortHeader label="Shipments" field="shipment_count" {...buyersSF} />
+                        <SortHeader label="Total CIF $" field="total_cif_usd" {...buyersSF} />
+                        <SortHeader label="Avg Rate $" field="avg_unit_rate_usd" {...buyersSF} />
+                        <SortHeader label="Suppliers" field="supplier_count" {...buyersSF} />
+                        <SortHeader label="HS8 Codes" field="hs8_codes_count" {...buyersSF} />
+                        <SortHeader label="China %" field="china_pct" {...buyersSF} />
+                      </tr></thead>
+                      <tbody>{buyersSF.sorted.slice(0, 200).map((b, i) => (
+                        <tr key={i} style={{ background: i % 2 === 0 ? 'transparent' : 'rgba(96,165,250,0.02)' }} onMouseEnter={e => e.currentTarget.style.background = 'rgba(96,165,250,0.04)'} onMouseLeave={e => e.currentTarget.style.background = i % 2 === 0 ? 'transparent' : 'rgba(96,165,250,0.02)'}>
+                          <td style={{ ...tdStyle, fontWeight: 700, color: COLORS.blue, textAlign: 'center' }}>{b.rank_in_hs4 || i + 1}</td>
+                          <td style={{ ...tdStyle, fontWeight: 600, color: COLORS.cyan, maxWidth: '180px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={b.company_name}>{b.company_name}</td>
+                          <td style={{ ...tdStyle, color: COLORS.blue, fontWeight: 600 }}>{b.hs4}</td>
+                          <td style={{ ...tdStyle, fontSize: '11px', color: '#94a3b8' }}>{b.iec || '—'}</td>
+                          <td style={tdStyle}>{b.city || '—'}</td>
+                          <td style={tdStyle}>{b.state || '—'}</td>
+                          <td style={{ ...tdStyle, fontWeight: 600 }}>{b.shipment_count || 0}</td>
+                          <td style={{ ...tdStyle, fontWeight: 600 }}>${((b.total_cif_usd || 0) / 1000).toFixed(1)}K</td>
+                          <td style={tdStyle}>${(b.avg_unit_rate_usd || 0).toFixed(2)}</td>
+                          <td style={tdStyle}>{b.supplier_count || '—'}</td>
+                          <td style={tdStyle}>{b.hs8_codes_count || 0}</td>
+                          <td style={{ ...tdStyle, color: (b.china_pct || 0) > 70 ? COLORS.maybe : (b.china_pct || 0) > 40 ? COLORS.pass : COLORS.watch, fontWeight: 600 }}>{(b.china_pct || 0).toFixed(0)}%</td>
+                        </tr>
+                      ))}</tbody>
+                    </table>
+                    {buyersSF.sorted.length > 200 && <div style={{ padding: '10px', textAlign: 'center', color: '#64748b', fontSize: '12px' }}>Showing 200 of {buyersSF.sorted.length}</div>}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* ===== RESEARCH CROSS-REFERENCE VIEW — All phases for one code ===== */}
+            {volzaView === 'xref' && (
               <div>
-                <div style={{ marginBottom: '16px', display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
-                  <select value={selectedVolzaHS4} onChange={e => setSelectedVolzaHS4(e.target.value)} style={{ padding: '8px 12px', background: '#1a2035', border: '1px solid rgba(148,163,184,0.1)', borderRadius: '8px', color: '#e2e8f0', fontSize: '13px', outline: 'none', minWidth: '200px' }}>
-                    <option value="">-- Select HS4 Code --</option>
-                    {[...new Set(volzaHS8Detail.map(h => h.hs4).filter(Boolean))].sort().map(h4 => {
-                      const codeInfo = codes.find(c => c.hs4 === h4);
-                      const shipCount = volzaHS8Detail.filter(h => h.hs4 === h4).reduce((a, h) => a + (h.shipment_count || 0), 0);
-                      return <option key={h4} value={h4}>HS4 {h4} — {codeInfo?.commodity || 'Unknown'} ({shipCount.toLocaleString()} ships)</option>;
-                    })}
+                <div style={{ display: 'flex', gap: '12px', marginBottom: '20px', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <select value={selectedVolzaHS4 || ''} onChange={e => setSelectedVolzaHS4(e.target.value || null)} style={{ padding: '8px 14px', background: '#1a2035', border: '1px solid rgba(148,163,184,0.1)', borderRadius: '8px', color: '#e2e8f0', fontSize: '13px', minWidth: '300px' }}>
+                    <option value="">-- Select HS4 Code for Cross-Reference --</option>
+                    {hs4List.map(h4 => { const info = codes.find(c => c.hs4 === h4); return <option key={h4} value={h4}>HS4 {h4} — {info?.commodity || ''} (${((byHS4Agg[h4]?.cif || 0) / 1e6).toFixed(2)}M CIF)</option>; })}
                   </select>
-                  <span style={{ fontSize: '12px', color: '#94a3b8' }}>
-                    {selectedVolzaHS4 ? `${volzaHS8Detail.filter(h => h.hs4 === selectedVolzaHS4).length} HS8 sub-codes` : 'Select a code to view HS8 breakdown'}
-                  </span>
                 </div>
 
-                {!selectedVolzaHS4 || volzaHS8Detail.filter(h => h.hs4 === selectedVolzaHS4).length === 0 ? (
-                  <div style={{ textAlign: 'center', padding: '60px', color: '#94a3b8' }}>
-                    {selectedVolzaHS4 ? `No HS8 detail data yet for HS4 ${selectedVolzaHS4}. Data will populate as Volza scraping progresses.` : 'Select an HS4 code to view its HS8 sub-product breakdown.'}
-                  </div>
-                ) : (() => {
-                  const hs8ForCode = volzaHS8Detail.filter(h => h.hs4 === selectedVolzaHS4);
-                  const hs8SF = useSortFilter(hs8ForCode, 'shipment_count', 'desc');
-                  const totalShips = hs8ForCode.reduce((a, h) => a + (h.shipment_count || 0), 0);
-                  const totalCIF = hs8ForCode.reduce((a, h) => a + (h.total_cif_usd || 0), 0);
-                  const avgChina = hs8ForCode.length > 0 ? (hs8ForCode.reduce((a, h) => a + (h.china_pct || 0), 0) / hs8ForCode.length).toFixed(1) : 0;
-
-                  return (
-                    <>
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '12px', marginBottom: '20px' }}>
-                        <Metric label="HS8 Sub-codes" value={hs8ForCode.length} color={COLORS.blue} />
-                        <Metric label="Total Shipments" value={totalShips.toLocaleString()} color={COLORS.cyan} />
-                        <Metric label="Total CIF Value" value={`$${(totalCIF / 1e6).toFixed(2)}M`} color={COLORS.pass} />
-                        <Metric label="Unique Buyers" value={[...new Set(hs8ForCode.flatMap(h => h.unique_buyers || 0))].length || '—'} color={COLORS.orange} />
-                        <Metric label="Avg China %" value={`${avgChina}%`} color={COLORS.maybe} />
-                        <Metric label="Avg Unit Rate" value={`$${(hs8ForCode.reduce((a, h) => a + (h.avg_unit_rate_usd || 0), 0) / hs8ForCode.length).toFixed(2)}`} color={COLORS.watch} />
-                      </div>
-
-                      <div style={{ display: 'flex', gap: '12px', marginBottom: '16px', alignItems: 'center' }}>
-                        <input type="text" placeholder="Search HS8 code, product..." value={hs8SF.search} onChange={e => hs8SF.setSearch(e.target.value)}
-                          style={{ padding: '8px 12px', background: '#1a2035', border: '1px solid rgba(148,163,184,0.1)', borderRadius: '8px', color: '#e2e8f0', fontSize: '12px', outline: 'none', flex: 1, minWidth: '200px' }} />
-                        <span style={{ fontSize: '12px', color: '#64748b' }}>Showing {hs8SF.sorted.length}</span>
-                      </div>
-
-                      <div style={{ border: '1px solid rgba(148,163,184,0.08)', borderRadius: '12px', overflow: 'hidden', maxHeight: '700px', overflowY: 'auto' }}>
-                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
-                          <thead><tr>
-                            <SortHeader label="HS8" field="hs8_code" sortField={hs8SF.sortField} sortDir={hs8SF.sortDir} onSort={hs8SF.onSort} />
-                            <th style={{ ...thStyle, maxWidth: '250px' }}>Product Description</th>
-                            <SortHeader label="Shipments" field="shipment_count" sortField={hs8SF.sortField} sortDir={hs8SF.sortDir} onSort={hs8SF.onSort} />
-                            <SortHeader label="Buyers" field="unique_buyers" sortField={hs8SF.sortField} sortDir={hs8SF.sortDir} onSort={hs8SF.onSort} />
-                            <SortHeader label="Shippers" field="unique_shippers" sortField={hs8SF.sortField} sortDir={hs8SF.sortDir} onSort={hs8SF.onSort} />
-                            <SortHeader label="Total CIF $" field="total_cif_usd" sortField={hs8SF.sortField} sortDir={hs8SF.sortDir} onSort={hs8SF.onSort} />
-                            <SortHeader label="Avg CIF $" field="avg_cif_usd" sortField={hs8SF.sortField} sortDir={hs8SF.sortDir} onSort={hs8SF.onSort} />
-                            <SortHeader label="Avg Unit Rate" field="avg_unit_rate_usd" sortField={hs8SF.sortField} sortDir={hs8SF.sortDir} onSort={hs8SF.onSort} />
-                            <SortHeader label="China %" field="china_pct" sortField={hs8SF.sortField} sortDir={hs8SF.sortDir} onSort={hs8SF.onSort} />
-                            <th style={thStyle}>Date Range</th>
-                          </tr></thead>
-                          <tbody>{hs8SF.sorted.map((h, i) => (
-                            <tr key={i} style={{ background: i % 2 === 0 ? 'transparent' : 'rgba(96,165,250,0.02)' }} onMouseEnter={e => e.currentTarget.style.background = 'rgba(96,165,250,0.04)'} onMouseLeave={e => e.currentTarget.style.background = i % 2 === 0 ? 'transparent' : 'rgba(96,165,250,0.02)'}>
-                              <td style={{ ...tdStyle, fontWeight: 700, color: COLORS.blue }}>{h.hs8_code}</td>
-                              <td style={{ ...tdStyle, maxWidth: '250px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={h.product_desc}>{h.product_desc}</td>
-                              <td style={{ ...tdStyle, fontWeight: 600 }}>{h.shipment_count?.toLocaleString() || '—'}</td>
-                              <td style={tdStyle}>{h.unique_buyers || '—'}</td>
-                              <td style={tdStyle}>{h.unique_shippers || '—'}</td>
-                              <td style={{ ...tdStyle, fontWeight: 600 }}>${(h.total_cif_usd / 1000).toFixed(1)}K</td>
-                              <td style={tdStyle}>${(h.avg_cif_usd || 0).toFixed(0)}</td>
-                              <td style={tdStyle}>${(h.avg_unit_rate_usd || 0).toFixed(2)}</td>
-                              <td style={{ ...tdStyle, color: h.china_pct > 70 ? COLORS.maybe : h.china_pct > 40 ? COLORS.pass : COLORS.watch, fontWeight: 600 }}>{(h.china_pct || 0).toFixed(0)}%</td>
-                              <td style={{ ...tdStyle, fontSize: '11px', color: '#64748b' }}>{h.first_date ? `${String(h.first_date).substring(0, 10)}` : '—'} → {h.last_date ? `${String(h.last_date).substring(0, 10)}` : '—'}</td>
-                            </tr>
-                          ))}</tbody>
-                        </table>
-                      </div>
-                    </>
-                  );
-                })()}
-              </div>
-            )}
-
-            {/* TOP BUYERS SUB-TAB */}
-            {volzaView === 'topbuyers' && (
-              <div>
-                <div style={{ marginBottom: '16px', display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
-                  <select value={selectedVolzaHS4} onChange={e => setSelectedVolzaHS4(e.target.value)} style={{ padding: '8px 12px', background: '#1a2035', border: '1px solid rgba(148,163,184,0.1)', borderRadius: '8px', color: '#e2e8f0', fontSize: '13px', outline: 'none', minWidth: '200px' }}>
-                    <option value="">-- Select HS4 Code --</option>
-                    {[...new Set(volzaTopBuyers.map(b => b.hs4).filter(Boolean))].sort().map(h4 => {
-                      const codeInfo = codes.find(c => c.hs4 === h4);
-                      const buyerCount = volzaTopBuyers.filter(b => b.hs4 === h4).length;
-                      return <option key={h4} value={h4}>HS4 {h4} — {codeInfo?.commodity || 'Unknown'} ({buyerCount} buyers)</option>;
-                    })}
-                  </select>
-                  <span style={{ fontSize: '12px', color: '#94a3b8' }}>
-                    {selectedVolzaHS4 ? `${volzaTopBuyers.filter(b => b.hs4 === selectedVolzaHS4).length} top buyers` : 'Select a code to view top buyers'}
-                  </span>
-                </div>
-
-                {!selectedVolzaHS4 || volzaTopBuyers.filter(b => b.hs4 === selectedVolzaHS4).length === 0 ? (
-                  <div style={{ textAlign: 'center', padding: '60px', color: '#94a3b8' }}>
-                    {selectedVolzaHS4 ? `No buyer data yet for HS4 ${selectedVolzaHS4}. Data will populate as Volza scraping progresses.` : 'Select an HS4 code to view its top buyers.'}
-                  </div>
-                ) : (() => {
-                  const buyersForCode = volzaTopBuyers.filter(b => b.hs4 === selectedVolzaHS4);
-                  const buyersSF = useSortFilter(buyersForCode, 'shipment_count', 'desc');
-                  const totalBuyers = buyersForCode.length;
-                  const totalCIF = buyersForCode.reduce((a, b) => a + (b.total_cif_usd || 0), 0);
-                  const avgCIF = totalBuyers > 0 ? totalCIF / totalBuyers : 0;
-
-                  return (
-                    <>
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '12px', marginBottom: '20px' }}>
-                        <Metric label="Total Buyers" value={totalBuyers} color={COLORS.blue} />
-                        <Metric label="Total CIF Value" value={`$${(totalCIF / 1e6).toFixed(2)}M`} color={COLORS.pass} />
-                        <Metric label="Avg CIF/Buyer" value={`$${(avgCIF / 1000).toFixed(1)}K`} color={COLORS.cyan} />
-                        <Metric label="Avg Shipments" value={((buyersForCode.reduce((a, b) => a + (b.shipment_count || 0), 0) / totalBuyers) || 0).toFixed(0)} color={COLORS.orange} />
-                      </div>
-
-                      <div style={{ display: 'flex', gap: '12px', marginBottom: '16px', alignItems: 'center' }}>
-                        <input type="text" placeholder="Search company name..." value={buyersSF.search} onChange={e => buyersSF.setSearch(e.target.value)}
-                          style={{ padding: '8px 12px', background: '#1a2035', border: '1px solid rgba(148,163,184,0.1)', borderRadius: '8px', color: '#e2e8f0', fontSize: '12px', outline: 'none', flex: 1, minWidth: '250px' }} />
-                        <span style={{ fontSize: '12px', color: '#64748b' }}>Showing {buyersSF.sorted.length}</span>
-                      </div>
-
-                      <div style={{ border: '1px solid rgba(148,163,184,0.08)', borderRadius: '12px', overflow: 'hidden', maxHeight: '700px', overflowY: 'auto' }}>
-                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
-                          <thead><tr>
-                            <th style={thStyle}>Rank</th>
-                            <SortHeader label="Company Name" field="company_name" sortField={buyersSF.sortField} sortDir={buyersSF.sortDir} onSort={buyersSF.onSort} style={{ minWidth: '200px' }} />
-                            <th style={thStyle}>IEC</th>
-                            <th style={thStyle}>City</th>
-                            <th style={thStyle}>State</th>
-                            <SortHeader label="Shipments" field="shipment_count" sortField={buyersSF.sortField} sortDir={buyersSF.sortDir} onSort={buyersSF.onSort} />
-                            <SortHeader label="Total CIF $" field="total_cif_usd" sortField={buyersSF.sortField} sortDir={buyersSF.sortDir} onSort={buyersSF.onSort} />
-                            <SortHeader label="Avg Rate $" field="avg_unit_rate_usd" sortField={buyersSF.sortField} sortDir={buyersSF.sortDir} onSort={buyersSF.onSort} />
-                            <th style={thStyle}>HS8 Codes</th>
-                            <SortHeader label="China %" field="china_pct" sortField={buyersSF.sortField} sortDir={buyersSF.sortDir} onSort={buyersSF.onSort} />
-                          </tr></thead>
-                          <tbody>{buyersSF.sorted.map((b, i) => (
-                            <tr key={i} style={{ background: i % 2 === 0 ? 'transparent' : 'rgba(96,165,250,0.02)' }} onMouseEnter={e => e.currentTarget.style.background = 'rgba(96,165,250,0.04)'} onMouseLeave={e => e.currentTarget.style.background = i % 2 === 0 ? 'transparent' : 'rgba(96,165,250,0.02)'}>
-                              <td style={{ ...tdStyle, fontWeight: 700, color: COLORS.blue, textAlign: 'center' }}>{i + 1}</td>
-                              <td style={{ ...tdStyle, fontWeight: 600, color: COLORS.cyan, maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={b.company_name}>{b.company_name}</td>
-                              <td style={{ ...tdStyle, fontSize: '11px', color: '#94a3b8' }}>{b.iec || '—'}</td>
-                              <td style={tdStyle}>{b.city || '—'}</td>
-                              <td style={tdStyle}>{b.state || '—'}</td>
-                              <td style={{ ...tdStyle, fontWeight: 600 }}>{b.shipment_count || 0}</td>
-                              <td style={{ ...tdStyle, fontWeight: 600 }}>${(b.total_cif_usd / 1000).toFixed(1)}K</td>
-                              <td style={tdStyle}>${(b.avg_unit_rate_usd || 0).toFixed(2)}</td>
-                              <td style={{ ...tdStyle, fontSize: '11px' }}>{b.hs8_codes_count || 0} codes</td>
-                              <td style={{ ...tdStyle, color: b.china_pct > 70 ? COLORS.maybe : b.china_pct > 40 ? COLORS.pass : COLORS.watch, fontWeight: 600 }}>{(b.china_pct || 0).toFixed(0)}%</td>
-                            </tr>
-                          ))}</tbody>
-                        </table>
-                      </div>
-                    </>
-                  );
-                })()}
-              </div>
-            )}
-
-            {/* SCRAPE QUEUE SUB-TAB */}
-            {volzaView === 'scrapequeue' && (
-              <div>
-                {(() => {
-                  const queueData = volzaQueue.map(q => {
-                    const codeData = codes.find(c => c.hs4 === q.hs4);
-                    return { ...q, commodity: codeData?.commodity, drill_score: codeData?.drill_score };
-                  });
-                  let sortedQueue = [...queueData].sort((a, b) => {
-                    let aVal = a[queueSort], bVal = b[queueSort];
-                    if (aVal == null && bVal == null) return 0;
-                    if (aVal == null) return 1;
-                    if (bVal == null) return -1;
-                    if (typeof aVal === 'number' && typeof bVal === 'number') {
-                      return queueSortDir === 'asc' ? aVal - bVal : bVal - aVal;
-                    }
-                    return queueSortDir === 'asc' ? String(aVal).localeCompare(String(bVal)) : String(bVal).localeCompare(String(aVal));
-                  });
-                  if (queueStatusFilter) {
-                    sortedQueue = sortedQueue.filter(q => (q.scrape_status || 'queued') === queueStatusFilter);
-                  }
-
-                  const queueStats = {
-                    total: queueData.length,
-                    completed: queueData.filter(q => q.scrape_status === 'completed').length,
-                    inProgress: queueData.filter(q => q.scrape_status === 'in_progress').length,
-                    queued: queueData.filter(q => q.scrape_status === 'queued').length,
-                  };
-
-                  return (
-                    <>
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '16px', marginBottom: '24px' }}>
-                        <KPI label="Total Codes" value={queueStats.total} variant="blue" />
-                        <KPI label="Completed" value={queueStats.completed} variant="pass" sub={`${((queueStats.completed / queueStats.total) * 100 || 0).toFixed(0)}%`} />
-                        <KPI label="In Progress" value={queueStats.inProgress} variant="maybe" />
-                        <KPI label="Queued" value={queueStats.queued} variant="orange" sub="Pending scrape" />
-                      </div>
-
-                      {queueData.length === 0 ? (
-                        <div style={{ textAlign: 'center', padding: '60px', color: '#94a3b8' }}>
-                          No scrape queue data yet. Phase 4 Volza scraping will populate this list.
+                {!xrefData ? (
+                  <div style={{ textAlign: 'center', padding: '80px', color: '#94a3b8' }}>Select an HS4 code above to view its complete research profile across all phases.</div>
+                ) : (
+                  <>
+                    {/* Summary Header */}
+                    <div style={{ background: 'linear-gradient(135deg, rgba(96,165,250,0.08), rgba(52,211,153,0.06))', border: '1px solid rgba(96,165,250,0.15)', borderRadius: '12px', padding: '20px', marginBottom: '20px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                        <div>
+                          <span style={{ fontSize: '24px', fontWeight: 700, color: COLORS.blue }}>HS4 {xrefCode}</span>
+                          <span style={{ fontSize: '16px', color: '#e2e8f0', marginLeft: '12px' }}>{xrefData.code.commodity || '—'}</span>
                         </div>
-                      ) : (
-                        <>
-                          <div style={{ display: 'flex', gap: '12px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
-                            <select value={queueStatusFilter} onChange={e => setQueueStatusFilter(e.target.value)} style={{ padding: '8px 12px', background: '#1a2035', border: '1px solid rgba(148,163,184,0.1)', borderRadius: '8px', color: '#e2e8f0', fontSize: '12px', outline: 'none' }}>
-                              <option value="">All Statuses</option>
-                              <option value="completed">Completed</option>
-                              <option value="in_progress">In Progress</option>
-                              <option value="queued">Queued</option>
-                            </select>
-                            <span style={{ fontSize: '12px', color: '#64748b' }}>Showing {sortedQueue.length} of {queueData.length}</span>
-                          </div>
-                          <div style={{ border: '1px solid rgba(148,163,184,0.08)', borderRadius: '12px', overflow: 'hidden', maxHeight: '700px', overflowY: 'auto' }}>
-                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
-                              <thead><tr>
-                                <SortHeader label="Priority #" field="priority" sortField={queueSort} sortDir={queueSortDir} onSort={(f) => { if (queueSort === f) setQueueSortDir(d => d === 'asc' ? 'desc' : 'asc'); else { setQueueSort(f); setQueueSortDir('asc'); } }} />
-                                <th style={thStyle}>HS4</th>
-                                <th style={thStyle}>Commodity</th>
-                                <SortHeader label="Score" field="drill_score" sortField={queueSort} sortDir={queueSortDir} onSort={(f) => { if (queueSort === f) setQueueSortDir(d => d === 'asc' ? 'desc' : 'asc'); else { setQueueSort(f); setQueueSortDir('desc'); } }} />
-                                <th style={thStyle}>Status</th>
-                                <th style={thStyle}>Completed At</th>
-                              </tr></thead>
-                              <tbody>{sortedQueue.map((q, i) => {
-                                const status = q.scrape_status || 'queued';
-                                const statusColor = status === 'completed' ? COLORS.pass : status === 'in_progress' ? COLORS.maybe : '#94a3b8';
-                                const statusBg = status === 'completed' ? RGB.pass : status === 'in_progress' ? RGB.maybe : '#1e293b';
-                                return (
-                                  <tr key={q.hs4}>
-                                    <td style={tdStyle}>{q.priority || '—'}</td>
-                                    <td style={{ ...tdStyle, fontWeight: 700, color: COLORS.blue }}>{q.hs4}</td>
-                                    <td style={{ ...tdStyle, maxWidth: '300px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={q.commodity}>{q.commodity || '—'}</td>
-                                    <td style={{ ...tdStyle, fontWeight: 600 }}>{q.drill_score?.toFixed(0) || '—'}</td>
-                                    <td style={tdStyle}><span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 600, background: statusBg, color: statusColor, border: `1px solid ${statusColor}50`, textTransform: 'capitalize' }}>{status}</span></td>
-                                    <td style={tdStyle}>{q.completed_at ? String(q.completed_at).substring(0, 10) : '—'}</td>
-                                  </tr>
-                                );
-                              })}</tbody>
-                            </table>
-                          </div>
-                        </>
-                      )}
-                    </>
-                  );
-                })()}
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                          <Badge label={xrefData.code.trading_model || 'UNASSIGNED'} />
+                          <Badge label={xrefData.scr.verdict || xrefData.code.qa_status || '—'} />
+                        </div>
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '12px' }}>
+                        <Metric label="Trade Value" value={`$${(xrefData.code.val_m || 0).toFixed(1)}M`} color={COLORS.blue} />
+                        <Metric label="P5 Score" value={xrefData.scr.total_score || '—'} color={xrefData.scr.total_score >= 120 ? COLORS.pass : xrefData.scr.total_score >= 90 ? COLORS.maybe : COLORS.drop} />
+                        <Metric label="Gross Margin" value={xrefData.dem.gross_margin_pct ? `${xrefData.dem.gross_margin_pct.toFixed(1)}%` : '—'} color={COLORS.pass} />
+                        <Metric label="Total Duty" value={xrefData.reg.total_duty_pct ? `${xrefData.reg.total_duty_pct.toFixed(1)}%` : '—'} color={COLORS.maybe} />
+                        <Metric label="Volza Shipments" value={(byHS4Agg[xrefCode]?.shipments || 0).toLocaleString()} color={COLORS.cyan} />
+                        <Metric label="Volza CIF" value={`$${((byHS4Agg[xrefCode]?.cif || 0) / 1e6).toFixed(2)}M`} color={COLORS.pass} />
+                      </div>
+                    </div>
+
+                    {/* P2: Supply + P3: Demand side-by-side */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '20px' }}>
+                      <Card title="P2: China Supply (Alibaba)" emoji="🏭">
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                          <Metric label="Total Suppliers" value={xrefData.sup.total_suppliers || '—'} color={COLORS.blue} />
+                          <Metric label="Gold Supplier %" value={xrefData.sup.gold_supplier_pct ? `${xrefData.sup.gold_supplier_pct.toFixed(1)}%` : '—'} color={COLORS.maybe} />
+                          <Metric label="FOB Low" value={xrefData.sup.fob_lowest_usd ? `$${xrefData.sup.fob_lowest_usd.toFixed(2)}` : '—'} color={COLORS.pass} />
+                          <Metric label="FOB High" value={xrefData.sup.fob_highest_usd ? `$${xrefData.sup.fob_highest_usd.toFixed(2)}` : '—'} color={COLORS.drop} />
+                          <Metric label="FOB Typical" value={xrefData.sup.fob_typical_usd ? `$${xrefData.sup.fob_typical_usd.toFixed(2)}` : '—'} color={COLORS.cyan} />
+                          <Metric label="MOQ" value={xrefData.sup.typical_moq || '—'} />
+                        </div>
+                      </Card>
+                      <Card title="P3: India Demand (IndiaMART)" emoji="🇮🇳">
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                          <Metric label="Total Sellers" value={xrefData.dem.total_sellers || '—'} color={COLORS.pass} />
+                          <Metric label="Manufacturer %" value={xrefData.dem.manufacturer_pct ? `${xrefData.dem.manufacturer_pct.toFixed(0)}%` : '—'} color={COLORS.blue} />
+                          <Metric label="Price Low" value={xrefData.dem.price_low_inr ? `₹${Number(xrefData.dem.price_low_inr).toLocaleString()}` : '—'} color={COLORS.pass} />
+                          <Metric label="Price High" value={xrefData.dem.price_high_inr ? `₹${Number(xrefData.dem.price_high_inr).toLocaleString()}` : '—'} color={COLORS.drop} />
+                          <Metric label="Landed Cost" value={xrefData.dem.landed_cost_inr ? `₹${Number(xrefData.dem.landed_cost_inr).toLocaleString()}` : '—'} color={COLORS.maybe} />
+                          <Metric label="Gross Margin" value={xrefData.dem.gross_margin_pct ? `${xrefData.dem.gross_margin_pct.toFixed(1)}%` : '—'} color={COLORS.pass} />
+                        </div>
+                      </Card>
+                    </div>
+
+                    {/* P2b: Regulatory */}
+                    <Card title="P2b: Regulatory Profile" emoji="📜" style={{ marginBottom: '20px' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px' }}>
+                        <RegItem icon="💰" label="BCD" value={xrefData.reg.bcd_pct ? `${xrefData.reg.bcd_pct}%` : '—'} />
+                        <RegItem icon="📊" label="IGST" value={xrefData.reg.igst_pct ? `${xrefData.reg.igst_pct}%` : '—'} />
+                        <RegItem icon="📋" label="SWS" value={xrefData.reg.sws_pct ? `${xrefData.reg.sws_pct}%` : '—'} />
+                        <RegItem icon="🔢" label="Total Duty" value={xrefData.reg.total_duty_pct ? `${xrefData.reg.total_duty_pct.toFixed(1)}%` : '—'} color={COLORS.maybe} />
+                        <RegItem icon={xrefData.reg.check_anti_dumping ? '🚫' : '✅'} label="Anti-Dumping" value={xrefData.reg.add_rate_pct ? `${xrefData.reg.add_rate_pct}%` : 'None'} color={xrefData.reg.check_anti_dumping ? COLORS.drop : COLORS.pass} />
+                        <RegItem icon={xrefData.reg.check_bis_qco ? '⚠️' : '✅'} label="BIS QCO" value={xrefData.reg.check_bis_qco ? 'Required' : 'Not Req'} color={xrefData.reg.check_bis_qco ? COLORS.maybe : COLORS.pass} />
+                        <RegItem icon={xrefData.reg.check_wpc ? '⚠️' : '✅'} label="WPC" value={xrefData.reg.check_wpc ? 'Required' : 'Not Req'} color={xrefData.reg.check_wpc ? COLORS.maybe : COLORS.pass} />
+                        <RegItem icon={xrefData.reg.check_tec ? '⚠️' : '✅'} label="TEC" value={xrefData.reg.check_tec ? 'Required' : 'Not Req'} color={xrefData.reg.check_tec ? COLORS.maybe : COLORS.pass} />
+                        <RegItem icon="🏷️" label="Risk Score" value={xrefData.reg.regulatory_risk_score || '—'} color={String(xrefData.reg.regulatory_risk_score).includes('LOW') ? COLORS.pass : String(xrefData.reg.regulatory_risk_score).includes('HIGH') ? COLORS.drop : COLORS.maybe} />
+                        {xrefData.reg.fta_benefit_notes && <RegItem icon="🤝" label="FTA" value={xrefData.reg.fta_benefit_notes} color={COLORS.cyan} />}
+                      </div>
+                    </Card>
+
+                    {/* P4: Volza Validation */}
+                    {xrefData.p4.hs4 && (
+                      <Card title="P4: Volza Validation" emoji="🚢" style={{ marginBottom: '20px' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '10px' }}>
+                          <Metric label="Shipments" value={(xrefData.p4.total_shipments || 0).toLocaleString()} color={COLORS.blue} />
+                          <Metric label="Unique Buyers" value={xrefData.p4.unique_buyers || 0} color={(xrefData.p4.unique_buyers || 0) > 20 ? COLORS.pass : COLORS.maybe} />
+                          <Metric label="Buyer HHI" value={xrefData.p4.buyer_hhi?.toFixed(0) || '—'} color={(xrefData.p4.buyer_hhi || 0) < 2500 ? COLORS.pass : COLORS.drop} />
+                          <Metric label="Median CIF" value={xrefData.p4.median_cif_usd ? `$${xrefData.p4.median_cif_usd.toFixed(0)}` : '—'} color={COLORS.cyan} />
+                          <Metric label="China %" value={xrefData.p4.china_sourcing_pct ? `${xrefData.p4.china_sourcing_pct.toFixed(0)}%` : '—'} color={(xrefData.p4.china_sourcing_pct || 0) > 40 ? COLORS.pass : COLORS.maybe} />
+                          <Metric label="Unique Shippers" value={xrefData.p4.unique_shippers || 0} color={COLORS.orange} />
+                        </div>
+                      </Card>
+                    )}
+
+                    {/* HS8 Breakdown for this code */}
+                    {xrefData.hs8.length > 0 && (
+                      <Card title={`HS8 Breakdown (${xrefData.hs8.length} sub-codes)`} emoji="🔬" style={{ marginBottom: '20px' }}>
+                        <div style={{ maxHeight: '350px', overflowY: 'auto' }}>
+                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                            <thead><tr><th style={thStyle}>HS8</th><th style={thStyle}>Product</th><th style={thStyle}>Shipments</th><th style={thStyle}>Buyers</th><th style={thStyle}>CIF $</th><th style={thStyle}>Avg Rate $</th><th style={thStyle}>China %</th></tr></thead>
+                            <tbody>{[...xrefData.hs8].sort((a, b) => (b.shipment_count || 0) - (a.shipment_count || 0)).map((h, i) => (
+                              <tr key={i}><td style={{ ...tdStyle, fontWeight: 700, color: COLORS.cyan }}>{h.hs8_code}</td>
+                                <td style={{ ...tdStyle, maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={h.product_desc}>{h.product_desc}</td>
+                                <td style={{ ...tdStyle, fontWeight: 600 }}>{(h.shipment_count || 0).toLocaleString()}</td>
+                                <td style={tdStyle}>{h.unique_buyers || 0}</td>
+                                <td style={{ ...tdStyle, fontWeight: 600 }}>${((h.total_cif_usd || 0) / 1000).toFixed(1)}K</td>
+                                <td style={tdStyle}>${(h.avg_unit_rate_usd || 0).toFixed(2)}</td>
+                                <td style={{ ...tdStyle, color: (h.china_pct || 0) > 40 ? COLORS.pass : COLORS.watch }}>{(h.china_pct || 0).toFixed(0)}%</td></tr>
+                            ))}</tbody>
+                          </table>
+                        </div>
+                      </Card>
+                    )}
+
+                    {/* Top Buyers for this code */}
+                    {xrefData.buyers.length > 0 && (
+                      <Card title={`Top Buyers (${xrefData.buyers.length})`} emoji="🎯">
+                        <div style={{ maxHeight: '350px', overflowY: 'auto' }}>
+                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                            <thead><tr><th style={thStyle}>#</th><th style={thStyle}>Company</th><th style={thStyle}>IEC</th><th style={thStyle}>City</th><th style={thStyle}>Shipments</th><th style={thStyle}>CIF $</th><th style={thStyle}>Avg Rate $</th><th style={thStyle}>Suppliers</th><th style={thStyle}>China %</th></tr></thead>
+                            <tbody>{[...xrefData.buyers].sort((a, b) => (b.total_cif_usd || 0) - (a.total_cif_usd || 0)).map((b, i) => (
+                              <tr key={i}><td style={tdStyle}>{i + 1}</td>
+                                <td style={{ ...tdStyle, fontWeight: 600, color: COLORS.cyan, maxWidth: '180px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={b.company_name}>{b.company_name}</td>
+                                <td style={{ ...tdStyle, fontSize: '11px' }}>{b.iec || '—'}</td>
+                                <td style={tdStyle}>{b.city || '—'}</td>
+                                <td style={{ ...tdStyle, fontWeight: 600 }}>{b.shipment_count || 0}</td>
+                                <td style={{ ...tdStyle, fontWeight: 600 }}>${((b.total_cif_usd || 0) / 1000).toFixed(1)}K</td>
+                                <td style={tdStyle}>${(b.avg_unit_rate_usd || 0).toFixed(2)}</td>
+                                <td style={tdStyle}>{b.supplier_count || '—'}</td>
+                                <td style={{ ...tdStyle, color: (b.china_pct || 0) > 40 ? COLORS.pass : COLORS.watch }}>{(b.china_pct || 0).toFixed(0)}%</td></tr>
+                            ))}</tbody>
+                          </table>
+                        </div>
+                      </Card>
+                    )}
+                  </>
+                )}
               </div>
             )}
+
+            {/* ===== PHASE 4 RESULTS VIEW ===== */}
+            {volzaView === 'phase4' && (() => {
+              const p4SF = useSortFilter(p4Data, 'total_shipments', 'desc');
+              return (
+                <div>
+                  {p4Data.length === 0 ? (
+                    <div style={{ textAlign: 'center', padding: '60px', color: '#94a3b8' }}>No Phase 4 validation results yet. Phase 4 runs after QA Gate passes.</div>
+                  ) : (<>
+                    <Card title="Validation Thresholds" emoji="📋" style={{ marginBottom: '20px' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
+                        <Metric label="Buyer HHI" value="< 2,500" color={COLORS.pass} sub="Distributed market" />
+                        <Metric label="Unique Buyers" value="> 20" color={COLORS.pass} sub="Sufficient pool" />
+                        <Metric label="Median CIF" value="$5K-$100K" color={COLORS.pass} sub="Trader range" />
+                        <Metric label="China Sourcing" value="> 40%" color={COLORS.pass} sub="Supply validated" />
+                      </div>
+                    </Card>
+                    <div style={{ display: 'flex', gap: '12px', marginBottom: '16px', alignItems: 'center' }}>
+                      <input type="text" placeholder="Search..." value={p4SF.search} onChange={e => p4SF.setSearch(e.target.value)}
+                        style={{ padding: '8px 12px', background: '#1a2035', border: '1px solid rgba(148,163,184,0.1)', borderRadius: '8px', color: '#e2e8f0', fontSize: '12px', minWidth: '200px' }} />
+                      <span style={{ fontSize: '12px', color: '#64748b' }}>{p4SF.sorted.length} codes validated</span>
+                    </div>
+                    <div style={{ border: '1px solid rgba(148,163,184,0.08)', borderRadius: '12px', overflow: 'hidden', maxHeight: '700px', overflowY: 'auto' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                        <thead><tr>
+                          <SortHeader label="HS4" field="hs4" {...p4SF} />
+                          <th style={thStyle}>Date</th>
+                          <SortHeader label="Shipments" field="total_shipments" {...p4SF} />
+                          <SortHeader label="Buyers" field="unique_buyers" {...p4SF} />
+                          <SortHeader label="HHI" field="buyer_hhi" {...p4SF} />
+                          <th style={thStyle}>Median CIF</th><th style={thStyle}>Avg CIF</th>
+                          <SortHeader label="Shippers" field="unique_shippers" {...p4SF} />
+                          <SortHeader label="China %" field="china_sourcing_pct" {...p4SF} />
+                          <th style={thStyle}>Unit Rate</th><th style={thStyle}>Result</th>
+                        </tr></thead>
+                        <tbody>{p4SF.sorted.map(p => (
+                          <tr key={p.hs4} onClick={() => { setSelectedVolzaHS4(p.hs4); setVolzaView('xref'); }} style={{ cursor: 'pointer' }} onMouseEnter={e => e.currentTarget.style.background = 'rgba(96,165,250,0.04)'} onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                            <td style={{ ...tdStyle, fontWeight: 700, color: COLORS.blue }}>{p.hs4}</td>
+                            <td style={tdStyle}>{p.scrape_date || '—'}</td>
+                            <td style={{ ...tdStyle, fontWeight: 600 }}>{(p.total_shipments || 0).toLocaleString()}</td>
+                            <td style={{ ...tdStyle, color: (p.unique_buyers || 0) > 20 ? COLORS.pass : COLORS.maybe }}>{p.unique_buyers || 0}</td>
+                            <td style={{ ...tdStyle, color: (p.buyer_hhi || 0) < 2500 ? COLORS.pass : COLORS.drop }}>{p.buyer_hhi?.toFixed(0) || '—'}</td>
+                            <td style={tdStyle}>{p.median_cif_usd ? `$${p.median_cif_usd.toFixed(0)}` : '—'}</td>
+                            <td style={tdStyle}>{p.avg_cif_usd ? `$${p.avg_cif_usd.toFixed(0)}` : '—'}</td>
+                            <td style={tdStyle}>{p.unique_shippers || 0}</td>
+                            <td style={{ ...tdStyle, color: (p.china_sourcing_pct || 0) > 40 ? COLORS.pass : COLORS.maybe }}>{p.china_sourcing_pct ? `${p.china_sourcing_pct.toFixed(0)}%` : '—'}</td>
+                            <td style={tdStyle}>{p.volza_avg_unit_rate ? `$${p.volza_avg_unit_rate.toFixed(2)}` : '—'}</td>
+                            <td style={tdStyle}>{p.kill_signal ? <span style={{ color: COLORS.drop }}>KILL</span> : <span style={{ color: COLORS.pass }}>PASS</span>}</td>
+                          </tr>
+                        ))}</tbody>
+                      </table>
+                    </div>
+                  </>)}
+                </div>
+              );
+            })()}
+
+            {/* ===== SCRAPE QUEUE VIEW ===== */}
+            {volzaView === 'queue' && (() => {
+              const queueData = volzaQueue.map(q => { const cd = codes.find(c => c.hs4 === q.hs4); return { ...q, commodity: cd?.commodity, drill_score: cd?.drill_score }; });
+              const qSF = useSortFilter(queueData, 'priority', 'asc');
+              let qFiltered = qSF.sorted;
+              if (queueStatusFilter) qFiltered = qFiltered.filter(q => (q.scrape_status || 'queued') === queueStatusFilter);
+              const qStats = { total: queueData.length, completed: queueData.filter(q => q.scrape_status === 'completed').length, inProgress: queueData.filter(q => q.scrape_status === 'in_progress').length, queued: queueData.filter(q => q.scrape_status === 'queued').length };
+
+              return (
+                <div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '16px', marginBottom: '24px' }}>
+                    <KPI label="Total Codes" value={qStats.total} variant="blue" />
+                    <KPI label="Completed" value={qStats.completed} variant="pass" sub={`${((qStats.completed / (qStats.total || 1)) * 100).toFixed(0)}%`} />
+                    <KPI label="In Progress" value={qStats.inProgress} variant="maybe" />
+                    <KPI label="Queued" value={qStats.queued} variant="orange" sub="Pending scrape" />
+                  </div>
+                  <div style={{ display: 'flex', gap: '12px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
+                    <select value={queueStatusFilter} onChange={e => setQueueStatusFilter(e.target.value)} style={{ padding: '8px 12px', background: '#1a2035', border: '1px solid rgba(148,163,184,0.1)', borderRadius: '8px', color: '#e2e8f0', fontSize: '12px' }}>
+                      <option value="">All Statuses</option>
+                      <option value="completed">Completed</option>
+                      <option value="in_progress">In Progress</option>
+                      <option value="queued">Queued</option>
+                    </select>
+                    <input type="text" placeholder="Search..." value={qSF.search} onChange={e => qSF.setSearch(e.target.value)}
+                      style={{ padding: '8px 12px', background: '#1a2035', border: '1px solid rgba(148,163,184,0.1)', borderRadius: '8px', color: '#e2e8f0', fontSize: '12px', minWidth: '200px' }} />
+                    <span style={{ fontSize: '12px', color: '#64748b' }}>Showing {qFiltered.length} of {queueData.length}</span>
+                    <ProgressBar label="Scrape Progress" value={qStats.completed} max={qStats.total} color={COLORS.pass} />
+                  </div>
+                  <div style={{ border: '1px solid rgba(148,163,184,0.08)', borderRadius: '12px', overflow: 'hidden', maxHeight: '700px', overflowY: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                      <thead><tr>
+                        <SortHeader label="Priority" field="priority" {...qSF} />
+                        <SortHeader label="HS4" field="hs4" {...qSF} />
+                        <th style={{ ...thStyle, minWidth: '200px' }}>Commodity</th>
+                        <SortHeader label="Score" field="drill_score" {...qSF} />
+                        <th style={thStyle}>Status</th>
+                        <th style={thStyle}>Completed</th>
+                      </tr></thead>
+                      <tbody>{qFiltered.map(q => {
+                        const st = q.scrape_status || 'queued';
+                        const stColor = st === 'completed' ? COLORS.pass : st === 'in_progress' ? COLORS.maybe : '#94a3b8';
+                        return (
+                          <tr key={q.hs4} onMouseEnter={e => e.currentTarget.style.background = 'rgba(96,165,250,0.04)'} onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                            <td style={tdStyle}>{q.priority || '—'}</td>
+                            <td style={{ ...tdStyle, fontWeight: 700, color: COLORS.blue }}>{q.hs4}</td>
+                            <td style={{ ...tdStyle, maxWidth: '250px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={q.commodity}>{q.commodity || '—'}</td>
+                            <td style={{ ...tdStyle, fontWeight: 600 }}>{q.drill_score?.toFixed(0) || '—'}</td>
+                            <td style={tdStyle}><span style={{ padding: '2px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 600, background: st === 'completed' ? RGB.pass : st === 'in_progress' ? RGB.maybe : '#1e293b', color: stColor, border: `1px solid ${stColor}50`, textTransform: 'capitalize' }}>{st}</span></td>
+                            <td style={tdStyle}>{q.completed_at ? String(q.completed_at).substring(0, 10) : '—'}</td>
+                          </tr>
+                        );
+                      })}</tbody>
+                    </table>
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         );
       })()}
