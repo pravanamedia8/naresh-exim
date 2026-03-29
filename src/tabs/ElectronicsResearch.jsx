@@ -9,7 +9,8 @@ const PHASE_LABELS = {
   phase1_complete: 'P1: DB Screen', phase2_pending: 'P2: Alibaba', phase2_done: 'P2 Done',
   phase2b_pending: 'P2b: Regulatory', phase2b_done: 'P2b Done', phase3_pending: 'P3: IndiaMART',
   phase3_done: 'P3 Done', qa_pending: 'QA Gate', qa_pass: 'QA Pass', phase4_pending: 'P4: Volza',
-  phase4_done: 'P4 Done', phase5_pending: 'P5: Scoring', phase5_done: 'Complete',
+  phase4_queued: 'P4: Queued', phase4_complete: 'P4 Complete', phase4_done: 'P4 Done',
+  phase5_pending: 'P5: Scoring', phase5_done: 'Complete',
   complete: 'Complete', COMPLETE: 'Complete', 'N/A': 'Complete',
 };
 
@@ -134,7 +135,6 @@ export default function ElectronicsResearch() {
   const [volzaHS4Filter, setVolzaHS4Filter] = useState('');
   const [volzaView, setVolzaView] = useState('overview');
   const [selectedVolzaHS4, setSelectedVolzaHS4] = useState(null);
-  const [fullAnalysis, setFullAnalysis] = useState([]);
   const [analyticsFilters, setAnalyticsFilters] = useState({ marginTier: '', marketSize: '', regRisk: '', tradingModel: '', bisReq: '', certCount: '' });
   const [volzaQueue, setVolzaQueue] = useState([]);
   // Shipments sort/filter
@@ -190,7 +190,6 @@ export default function ElectronicsResearch() {
         setVolzaBuyers(vbRes.data || []);
         setVolzaHS8Detail(vh8Res.data || []);
         setVolzaTopBuyers(vtbRes.data || []);
-        setFullAnalysis([]);
         setVolzaQueue(queueRes.data || []);
       } catch (err) { console.error('Fetch error:', err); }
       finally { setLoading(false); }
@@ -224,7 +223,7 @@ export default function ElectronicsResearch() {
       const v = c.verdict_scoring || 'N/A'; byVerdict[v] = (byVerdict[v] || 0) + 1;
       totalValM += c.val_m || 0;
     });
-    const completed = codes.filter(c => c.current_phase === 'complete' || c.current_phase === 'COMPLETE' || c.current_phase === 'phase5_done' || c.current_phase === 'N/A');
+    const completed = codes.filter(c => ['complete', 'COMPLETE', 'phase5_done', 'N/A', 'phase4_done', 'phase4_complete', 'phase4_queued'].includes(c.current_phase));
     completed.forEach(c => completedVal += c.val_m || 0);
     const p2bDone = regulatory.filter(r => r.completed_at).length;
     const p2Done = supply.length;
@@ -250,8 +249,41 @@ export default function ElectronicsResearch() {
     }));
   }, [codes, regulatory, supply, demand, scoring]);
 
-  const completedCodes = useMemo(() => mergedCodes.filter(c => c.qa_status === 'PASS' || c._scor), [mergedCodes]);
+  const completedCodes = useMemo(() => mergedCodes.filter(c => c.qa_status === 'PASS' || c._scor || c.current_phase === 'complete' || c.current_phase === 'phase4_done' || c.current_phase === 'phase4_complete' || c.current_phase === 'phase4_queued'), [mergedCodes]);
   const scoredCodes = useMemo(() => mergedCodes.filter(c => c._scor), [mergedCodes]);
+
+  // Analytics Deep Dive: Build full analysis from merged data (codes that have both supply + demand data)
+  const fullAnalysis = useMemo(() => {
+    return mergedCodes.filter(c => c._sup || c._dem).map(c => {
+      const reg = c._reg || {};
+      const sup = c._sup || {};
+      const dem = c._dem || {};
+      const scr = c._scor || {};
+      const p4 = c._p4 || {};
+      const grossMargin = dem.gross_margin_pct ?? null;
+      const valM = c.val_m || 0;
+      const oppScore = grossMargin != null && grossMargin > 0 ? Math.round(grossMargin * valM / 10) : 0;
+      const certCount = (reg.check_bis_qco ? 1 : 0) + (reg.check_wpc ? 1 : 0) + (reg.check_tec ? 1 : 0);
+      const marginTier = grossMargin == null ? 'UNKNOWN' : grossMargin > 50 ? '50%+' : grossMargin > 30 ? '30-50%' : grossMargin > 15 ? '15-30%' : grossMargin > 0 ? '0-15%' : 'Negative';
+      const marketTier = valM >= 500 ? '$500M+' : valM >= 100 ? '$100-500M' : valM >= 50 ? '$50-100M' : valM >= 10 ? '$10-50M' : '<$10M';
+      return {
+        hs4: c.hs4, commodity: c.commodity, val_m: valM, drill_score: c.drill_score,
+        trading_model: c.trading_model, qa_status: c.qa_status, current_phase: c.current_phase,
+        total_suppliers: sup.total_suppliers || 0, fob_lowest_usd: sup.fob_lowest_usd, fob_highest_usd: sup.fob_highest_usd, fob_typical_usd: sup.fob_typical_usd,
+        gold_supplier_pct: sup.gold_supplier_pct || 0,
+        total_sellers: dem.total_sellers || 0, manufacturer_pct: dem.manufacturer_pct, trader_pct: dem.trader_pct,
+        price_low_inr: dem.price_low_inr, price_high_inr: dem.price_high_inr, price_typical_inr: dem.price_typical_inr,
+        landed_cost_inr: dem.landed_cost_inr, sell_price_inr: dem.sell_price_inr,
+        gross_margin_pct: grossMargin, gross_margin_inr: dem.gross_margin_inr,
+        total_duty_pct: reg.total_duty_pct || 0, regulatory_risk_score: reg.regulatory_risk_score || 'UNKNOWN',
+        bis_required: reg.check_bis_qco, wpc_required: reg.check_wpc, tec_required: reg.check_tec,
+        add_rate_pct: reg.add_rate_pct || 0, dgft_notes: reg.dgft_notes,
+        total_score: scr.total_score || null, verdict: scr.verdict || null,
+        v_shipments: p4.total_shipments || null, v_buyers: p4.unique_buyers || null, hhi: p4.buyer_hhi || null, china_pct: p4.china_sourcing_pct || null,
+        opportunity_score: oppScore, margin_tier: marginTier, market_size_tier: marketTier, cert_count: certCount,
+      };
+    });
+  }, [mergedCodes]);
 
   // Deep dive data
   const deepDive = useMemo(() => {
@@ -351,7 +383,14 @@ export default function ElectronicsResearch() {
     const totalBuyerCount = Object.values(byHS4Agg).reduce((a, v) => a + v.buyers, 0);
     const totalShipperCount = Object.values(byHS4Agg).reduce((a, v) => a + v.shippers, 0);
     const countriesAgg = {};
-    volzaHS8Detail.forEach(h => { if (h.countries) String(h.countries).split(',').forEach(c => { c = c.trim(); if (c) countriesAgg[c] = (countriesAgg[c] || 0) + (h.shipment_count || 1); }); });
+    volzaHS8Detail.forEach(h => {
+      if (h.countries) {
+        try {
+          const parsed = typeof h.countries === 'string' ? JSON.parse(h.countries) : h.countries;
+          if (Array.isArray(parsed)) parsed.forEach(item => { const name = item.c || item.country || ''; const count = item.n || item.count || 1; if (name) countriesAgg[name] = (countriesAgg[name] || 0) + count; });
+        } catch(e) { String(h.countries).split(',').forEach(c => { c = c.trim(); if (c) countriesAgg[c] = (countriesAgg[c] || 0) + (h.shipment_count || 1); }); }
+      }
+    });
     const topCountries = Object.entries(countriesAgg).sort((a, b) => b[1] - a[1]).slice(0, 10);
     const hs4ChartData = Object.entries(byHS4Agg).sort((a, b) => b[1].shipments - a[1].shipments).slice(0, 20).map(([k, v]) => ({ hs4: k, shipments: v.shipments, cif: v.cif, cifM: v.cif / 1e6 }));
     const unifiedCodes = hs4List.map(h4 => {
