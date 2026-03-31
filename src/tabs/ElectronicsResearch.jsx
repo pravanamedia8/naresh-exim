@@ -168,6 +168,13 @@ export default function ElectronicsResearch() {
   const [queueSort, setQueueSort] = useState('priority');
   const [queueSortDir, setQueueSortDir] = useState('asc');
   const [queueStatusFilter, setQueueStatusFilter] = useState('');
+  // Business Blueprint state
+  const [hs8Margins, setHs8Margins] = useState([]);
+  const [buyerTargets, setBuyerTargets] = useState([]);
+  const [chinaSuppliers, setChinaSuppliers] = useState([]);
+  const [supplyChainPlan, setSupplyChainPlan] = useState([]);
+  const [blueprintView, setBlueprintView] = useState('overview');
+  const [blueprintHS4, setBlueprintHS4] = useState('');
   const PAGE_SIZE = 50;
 
   // Fetch all data
@@ -176,7 +183,8 @@ export default function ElectronicsResearch() {
       try {
         setLoading(true);
         const [codesRes, regRes, supRes, demRes, scorRes, p4Res, vsRes, vbRes, vh8Res, vtbRes, queueRes,
-               hs8bRes, cmRes, mtRes, bsRes, tsRes, paRes, psRes] = await Promise.all([
+               hs8bRes, cmRes, mtRes, bsRes, tsRes, paRes, psRes,
+               h8mRes, btRes, csRes, scpRes] = await Promise.all([
           supabase.from('research_codes').select('*').order('drill_score', { ascending: false }),
           supabase.from('phase2b_regulatory').select('*'),
           supabase.from('phase2_alibaba_summary').select('*'),
@@ -195,6 +203,10 @@ export default function ElectronicsResearch() {
           supabase.from('volza_top_shippers').select('*'),
           supabase.from('volza_port_analysis').select('*'),
           supabase.from('volza_price_stats').select('*'),
+          supabase.from('hs8_margin_analysis').select('*').order('gross_margin_pct', { ascending: false }),
+          supabase.from('buyer_targets').select('*').order('total_cif_usd', { ascending: false }),
+          supabase.from('china_suppliers').select('*'),
+          supabase.from('supply_chain_plan').select('*').order('final_score', { ascending: false }),
         ]);
         setCodes(codesRes.data || []);
         setRegulatory(regRes.data || []);
@@ -214,6 +226,10 @@ export default function ElectronicsResearch() {
         setTopShippers(tsRes.data || []);
         setPortAnalysis(paRes.data || []);
         setPriceStats(psRes.data || []);
+        setHs8Margins(h8mRes.data || []);
+        setBuyerTargets(btRes.data || []);
+        setChinaSuppliers(csRes.data || []);
+        setSupplyChainPlan(scpRes.data || []);
       } catch (err) { console.error('Fetch error:', err); }
       finally { setLoading(false); }
     };
@@ -237,6 +253,10 @@ export default function ElectronicsResearch() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'volza_top_shippers' }, () => fetchData())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'volza_port_analysis' }, () => fetchData())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'volza_price_stats' }, () => fetchData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'hs8_margin_analysis' }, () => fetchData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'buyer_targets' }, () => fetchData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'china_suppliers' }, () => fetchData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'supply_chain_plan' }, () => fetchData())
       .subscribe();
     return () => sub.unsubscribe();
   }, []);
@@ -474,6 +494,7 @@ export default function ElectronicsResearch() {
     { id: 'regulatory', label: '🛡️ Regulatory Matrix' },
     { id: 'supply', label: '🏭 Supply vs Demand' },
     { id: 'volza', label: `🚢 Volza Deep Dive (${volzaHS8Detail.reduce((a, h) => a + (h.shipment_count || 0), 0).toLocaleString()})` },
+    { id: 'blueprint', label: `🗺️ Business Blueprint (${supplyChainPlan.length})` },
     { id: 'allcodes', label: '📋 All 180 Codes' },
     { id: 'queue', label: '📑 Research Queue' },
   ];
@@ -2194,6 +2215,420 @@ export default function ElectronicsResearch() {
                 </div>
               );
             })()}
+          </div>
+        );
+      })()}
+
+      {/* ==================== TAB: BUSINESS BLUEPRINT ==================== */}
+      {activeTab === 'blueprint' && (() => {
+        const BLUEPRINT_VIEWS = [
+          { key: 'overview', icon: '🗺️', label: 'Overview' },
+          { key: 'margins', icon: '💰', label: `HS8 Margins (${hs8Margins.length})` },
+          { key: 'buyers', icon: '🎯', label: `Buyer Targets (${buyerTargets.length})` },
+          { key: 'suppliers', icon: '🏭', label: `China Suppliers (${chinaSuppliers.length})` },
+          { key: 'plan', icon: '📋', label: `Supply Chain (${supplyChainPlan.length})` },
+        ];
+        const bpHS4s = [...new Set(supplyChainPlan.map(s => s.hs4))];
+        const filteredMargins = blueprintHS4 ? hs8Margins.filter(m => m.hs4 === blueprintHS4) : hs8Margins;
+        const filteredBuyers = blueprintHS4 ? buyerTargets.filter(b => b.hs4 === blueprintHS4) : buyerTargets;
+        const filteredSuppliers = blueprintHS4 ? chinaSuppliers.filter(s => s.hs4 === blueprintHS4) : chinaSuppliers;
+        const filteredPlans = blueprintHS4 ? supplyChainPlan.filter(p => p.hs4 === blueprintHS4) : supplyChainPlan;
+        const pursueCount = supplyChainPlan.filter(p => p.final_verdict === 'PURSUE').length;
+        const strongCount = supplyChainPlan.filter(p => p.final_verdict === 'STRONG').length;
+        const totalRevenue = supplyChainPlan.reduce((a, p) => a + (p.expected_monthly_revenue_usd || 0), 0);
+        const totalProfit = supplyChainPlan.reduce((a, p) => a + (p.expected_monthly_profit_usd || 0), 0);
+        const avgMargin = hs8Margins.length > 0 ? hs8Margins.reduce((a, m) => a + (m.gross_margin_pct || 0), 0) / hs8Margins.length : 0;
+        const totalWC = supplyChainPlan.reduce((a, p) => a + (p.working_capital_required_inr || 0), 0);
+        const marginByTier = { HIGH: 0, MEDIUM: 0, LOW: 0, NEGATIVE: 0 };
+        hs8Margins.forEach(m => { marginByTier[m.margin_tier || 'LOW'] = (marginByTier[m.margin_tier || 'LOW'] || 0) + 1; });
+
+        return (
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
+              <h2 style={{ fontSize: '20px', color: '#e2e8f0', margin: 0 }}>🗺️ Business Blueprint — Complete Entry Strategy</h2>
+              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center' }}>
+                <select value={blueprintHS4} onChange={e => setBlueprintHS4(e.target.value)} style={{ padding: '6px 12px', background: '#1a2035', border: '1px solid rgba(148,163,184,0.1)', borderRadius: '8px', color: '#e2e8f0', fontSize: '12px' }}>
+                  <option value="">All HS4 Codes</option>
+                  {bpHS4s.map(h => <option key={h} value={h}>{h} — {(supplyChainPlan.find(p => p.hs4 === h) || {}).commodity || ''}</option>)}
+                </select>
+                {BLUEPRINT_VIEWS.map(v => (
+                  <button key={v.key} onClick={() => setBlueprintView(v.key)} style={{ padding: '6px 14px', borderRadius: '8px', fontSize: '12px', fontWeight: blueprintView === v.key ? 600 : 400, background: blueprintView === v.key ? RGB.blue : 'transparent', color: blueprintView === v.key ? COLORS.blue : '#94a3b8', border: `1px solid ${blueprintView === v.key ? COLORS.blue + '50' : 'rgba(148,163,184,0.08)'}`, cursor: 'pointer' }}>
+                    {v.icon} {v.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* BLUEPRINT KPIs */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '14px', marginBottom: '24px' }}>
+              <KPI label="Products Analyzed" value={supplyChainPlan.length} variant="blue" sub={`${[...new Set(hs8Margins.map(m => m.hs4))].length} with HS8 margins`} />
+              <KPI label="PURSUE" value={pursueCount} variant="pass" sub={`${strongCount} STRONG`} />
+              <KPI label="HS8 Sub-Codes" value={hs8Margins.length} variant="cyan" sub={`${marginByTier.HIGH || 0} high margin`} />
+              <KPI label="Avg Gross Margin" value={`${avgMargin.toFixed(1)}%`} variant="pass" />
+              <KPI label="Target Buyers" value={buyerTargets.length} variant="blue" sub={`${buyerTargets.filter(b => b.priority === 'A').length} Priority-A`} />
+              <KPI label="Est. Monthly Revenue" value={`$${(totalRevenue / 1000).toFixed(0)}K`} variant="cyan" sub={`$${(totalProfit / 1000).toFixed(0)}K profit`} />
+              <KPI label="Working Capital" value={`₹${(totalWC / 100000).toFixed(1)}L`} variant="maybe" />
+            </div>
+
+            {/* OVERVIEW SUB-VIEW */}
+            {blueprintView === 'overview' && (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+                {/* Margin Distribution Chart */}
+                <Card title="Margin Distribution by HS8" emoji="📊">
+                  <ResponsiveContainer width="100%" height={280}>
+                    <BarChart data={[
+                      { tier: 'HIGH (>30%)', count: marginByTier.HIGH || 0, fill: COLORS.pass },
+                      { tier: 'MEDIUM (15-30%)', count: marginByTier.MEDIUM || 0, fill: COLORS.blue },
+                      { tier: 'LOW (5-15%)', count: marginByTier.LOW || 0, fill: COLORS.maybe },
+                      { tier: 'NEGATIVE', count: marginByTier.NEGATIVE || 0, fill: COLORS.drop },
+                    ]}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.06)" />
+                      <XAxis dataKey="tier" tick={{ fontSize: 11, fill: '#94a3b8' }} />
+                      <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} />
+                      <Tooltip contentStyle={{ background: '#1a2035', border: '1px solid rgba(148,163,184,0.1)', borderRadius: '8px', fontSize: '12px' }} />
+                      <Bar dataKey="count" name="HS8 Codes" radius={[6, 6, 0, 0]}>
+                        {[COLORS.pass, COLORS.blue, COLORS.maybe, COLORS.drop].map((c, i) => <Cell key={i} fill={c} />)}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </Card>
+
+                {/* Verdict Pie */}
+                <Card title="Product Verdicts" emoji="🎯">
+                  <ResponsiveContainer width="100%" height={280}>
+                    <PieChart>
+                      <Pie data={[
+                        { name: 'PURSUE', value: pursueCount, fill: COLORS.pass },
+                        { name: 'STRONG', value: strongCount, fill: COLORS.blue },
+                        { name: 'MODERATE', value: supplyChainPlan.filter(p => p.final_verdict === 'MODERATE').length, fill: COLORS.maybe },
+                        { name: 'DROP', value: supplyChainPlan.filter(p => p.final_verdict === 'DROP').length, fill: COLORS.drop },
+                      ].filter(d => d.value > 0)} dataKey="value" cx="50%" cy="50%" outerRadius={100} label={({ name, value }) => `${name}: ${value}`}>
+                      </Pie>
+                      <Tooltip />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </Card>
+
+                {/* Top Products by Margin */}
+                <Card title="Top HS4 by Average Margin" emoji="💰" style={{ gridColumn: '1 / -1' }}>
+                  {(() => {
+                    const byHS4 = {};
+                    hs8Margins.forEach(m => {
+                      if (!byHS4[m.hs4]) byHS4[m.hs4] = { hs4: m.hs4, margins: [], totalVal: 0 };
+                      byHS4[m.hs4].margins.push(m.gross_margin_pct || 0);
+                      byHS4[m.hs4].totalVal += m.trade_val_m || 0;
+                    });
+                    const ranked = Object.values(byHS4).map(g => ({
+                      hs4: g.hs4,
+                      avgMargin: g.margins.reduce((a, b) => a + b, 0) / g.margins.length,
+                      hs8Count: g.margins.length,
+                      totalVal: g.totalVal,
+                      commodity: (supplyChainPlan.find(p => p.hs4 === g.hs4) || {}).commodity || '',
+                    })).sort((a, b) => b.avgMargin - a.avgMargin);
+                    return (
+                      <ResponsiveContainer width="100%" height={250}>
+                        <BarChart data={ranked} layout="vertical">
+                          <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.06)" />
+                          <XAxis type="number" tick={{ fontSize: 11, fill: '#94a3b8' }} unit="%" />
+                          <YAxis dataKey="hs4" type="category" width={60} tick={{ fontSize: 12, fill: '#e2e8f0', fontWeight: 600 }} />
+                          <Tooltip contentStyle={{ background: '#1a2035', border: '1px solid rgba(148,163,184,0.1)', borderRadius: '8px', fontSize: '12px' }} formatter={v => `${v.toFixed(1)}%`} />
+                          <Bar dataKey="avgMargin" name="Avg Gross Margin %" fill={COLORS.pass} radius={[0, 6, 6, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    );
+                  })()}
+                </Card>
+
+                {/* Supply Chain Summary Cards */}
+                <Card title="Entry Strategy Summary" emoji="🚀" style={{ gridColumn: '1 / -1' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '16px' }}>
+                    {supplyChainPlan.filter(p => p.final_verdict === 'PURSUE').slice(0, 6).map(p => (
+                      <div key={p.hs4} style={{ background: '#1a2035', borderRadius: '10px', padding: '16px', border: '1px solid rgba(52,211,153,0.15)' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                          <span style={{ fontWeight: 700, color: '#e2e8f0', fontSize: '15px' }}>{p.hs4}</span>
+                          <Badge label={p.final_verdict} />
+                        </div>
+                        <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '8px' }}>{p.commodity}</div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '12px' }}>
+                          <div><span style={{ color: '#64748b' }}>Score:</span> <span style={{ color: COLORS.pass, fontWeight: 600 }}>{p.final_score}/150</span></div>
+                          <div><span style={{ color: '#64748b' }}>Model:</span> <span style={{ color: MODEL_COLORS[p.trading_model] || '#94a3b8', fontWeight: 600 }}>{p.trading_model}</span></div>
+                          <div><span style={{ color: '#64748b' }}>Margin:</span> <span style={{ color: COLORS.pass, fontWeight: 600 }}>{(p.gross_margin_pct || 0).toFixed(1)}%</span></div>
+                          <div><span style={{ color: '#64748b' }}>Market:</span> <span style={{ color: '#e2e8f0' }}>${(p.market_size_usd_m || 0).toFixed(0)}M</span></div>
+                          <div><span style={{ color: '#64748b' }}>WC:</span> <span style={{ color: '#e2e8f0' }}>₹{((p.working_capital_required_inr || 0) / 100000).toFixed(1)}L</span></div>
+                          <div><span style={{ color: '#64748b' }}>Risk:</span> <Badge label={p.risk_level || 'N/A'} /></div>
+                        </div>
+                        {p.phase1_action && <div style={{ marginTop: '10px', fontSize: '11px', color: '#94a3b8', background: 'rgba(96,165,250,0.06)', borderRadius: '6px', padding: '8px' }}><strong style={{ color: '#60a5fa' }}>Phase 1:</strong> {p.phase1_action}</div>}
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+              </div>
+            )}
+
+            {/* MARGINS SUB-VIEW */}
+            {blueprintView === 'margins' && (
+              <div>
+                <Card title="HS8-Level Margin Analysis — China FOB vs India Sell Price" emoji="💰">
+                  <div style={{ marginBottom: '16px', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                    {['', 'HIGH', 'MEDIUM', 'LOW', 'NEGATIVE'].map(t => (
+                      <button key={t} onClick={() => setBlueprintHS4('')} style={{ padding: '4px 12px', borderRadius: '6px', fontSize: '11px', background: 'transparent', color: '#94a3b8', border: '1px solid rgba(148,163,184,0.1)', cursor: 'pointer' }}>
+                        {t || 'All Tiers'} ({t ? hs8Margins.filter(m => m.margin_tier === t).length : hs8Margins.length})
+                      </button>
+                    ))}
+                  </div>
+                  <div style={{ border: '1px solid rgba(148,163,184,0.08)', borderRadius: '12px', overflow: 'hidden', maxHeight: '600px', overflowY: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                      <thead><tr>
+                        <th style={thStyle}>HS4</th><th style={thStyle}>HS8</th><th style={{ ...thStyle, minWidth: '160px' }}>Description</th>
+                        <th style={thStyle}>Trade $M</th><th style={thStyle}>China FOB $</th><th style={thStyle}>India Price ₹</th>
+                        <th style={thStyle}>Total Duty %</th><th style={thStyle}>Landed ₹</th><th style={thStyle}>Gross Margin %</th><th style={thStyle}>Tier</th>
+                        <th style={thStyle}>Sourcing</th><th style={thStyle}>Demand</th>
+                      </tr></thead>
+                      <tbody>{filteredMargins.map((m, i) => (
+                        <tr key={m.id || i} style={{ background: i % 2 === 0 ? 'transparent' : 'rgba(96,165,250,0.02)' }}>
+                          <td style={{ ...tdStyle, fontWeight: 700, color: COLORS.blue, cursor: 'pointer' }} onClick={() => { setBlueprintHS4(m.hs4); }}>{m.hs4}</td>
+                          <td style={{ ...tdStyle, fontFamily: 'monospace', fontSize: '11px' }}>{m.hs8}</td>
+                          <td style={{ ...tdStyle, maxWidth: '180px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={m.hs8_description}>{m.hs8_description}</td>
+                          <td style={{ ...tdStyle, fontWeight: 600 }}>${(m.trade_val_m || 0).toFixed(1)}</td>
+                          <td style={tdStyle}>${(m.china_fob_typical_usd || 0).toFixed(2)}</td>
+                          <td style={tdStyle}>₹{(m.india_price_typical_inr || 0).toLocaleString()}</td>
+                          <td style={tdStyle}>{(m.total_duty_pct || 0).toFixed(1)}%</td>
+                          <td style={tdStyle}>₹{(m.landed_cost_inr || 0).toLocaleString()}</td>
+                          <td style={{ ...tdStyle, fontWeight: 700, color: (m.gross_margin_pct || 0) > 30 ? COLORS.pass : (m.gross_margin_pct || 0) > 15 ? COLORS.blue : (m.gross_margin_pct || 0) > 0 ? COLORS.maybe : COLORS.drop }}>{(m.gross_margin_pct || 0).toFixed(1)}%</td>
+                          <td style={tdStyle}><Badge label={m.margin_tier || 'N/A'} /></td>
+                          <td style={tdStyle}><Badge label={m.sourcing_difficulty || 'N/A'} /></td>
+                          <td style={tdStyle}><Badge label={m.demand_strength || 'N/A'} /></td>
+                        </tr>
+                      ))}</tbody>
+                    </table>
+                  </div>
+                </Card>
+
+                {/* Margin Scatter: FOB vs India Price */}
+                <Card title="Margin Landscape — FOB vs Sell Price" emoji="📊" style={{ marginTop: '20px' }}>
+                  <ResponsiveContainer width="100%" height={350}>
+                    <ScatterChart>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.06)" />
+                      <XAxis dataKey="china_fob_typical_usd" name="China FOB $" tick={{ fontSize: 11, fill: '#94a3b8' }} label={{ value: 'China FOB (USD)', position: 'bottom', fill: '#64748b', fontSize: 11 }} />
+                      <YAxis dataKey="gross_margin_pct" name="Gross Margin %" tick={{ fontSize: 11, fill: '#94a3b8' }} label={{ value: 'Gross Margin %', angle: -90, position: 'left', fill: '#64748b', fontSize: 11 }} />
+                      <ZAxis dataKey="trade_val_m" range={[40, 400]} name="Trade $M" />
+                      <Tooltip contentStyle={{ background: '#1a2035', border: '1px solid rgba(148,163,184,0.1)', borderRadius: '8px', fontSize: '12px' }} formatter={(v, name) => [typeof v === 'number' ? v.toFixed(2) : v, name]} />
+                      <Scatter data={filteredMargins} fill={COLORS.pass}>
+                        {filteredMargins.map((m, i) => <Cell key={i} fill={m.margin_tier === 'HIGH' ? COLORS.pass : m.margin_tier === 'MEDIUM' ? COLORS.blue : m.margin_tier === 'LOW' ? COLORS.maybe : COLORS.drop} />)}
+                      </Scatter>
+                    </ScatterChart>
+                  </ResponsiveContainer>
+                </Card>
+              </div>
+            )}
+
+            {/* BUYERS SUB-VIEW */}
+            {blueprintView === 'buyers' && (
+              <div>
+                <Card title="Indian Buyer Targets — Who to Approach First" emoji="🎯">
+                  <div style={{ marginBottom: '16px', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                    {['', 'A', 'B', 'C'].map(p => (
+                      <button key={p} onClick={() => {}} style={{ padding: '4px 12px', borderRadius: '6px', fontSize: '11px', background: p === '' ? RGB.blue : 'transparent', color: p === '' ? COLORS.blue : '#94a3b8', border: '1px solid rgba(148,163,184,0.1)', cursor: 'pointer' }}>
+                        {p || 'All'} Priority ({p ? filteredBuyers.filter(b => b.priority === p).length : filteredBuyers.length})
+                      </button>
+                    ))}
+                  </div>
+                  <div style={{ border: '1px solid rgba(148,163,184,0.08)', borderRadius: '12px', overflow: 'hidden', maxHeight: '600px', overflowY: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                      <thead><tr>
+                        <th style={thStyle}>HS4</th><th style={{ ...thStyle, minWidth: '180px' }}>Company</th><th style={thStyle}>IEC</th>
+                        <th style={thStyle}>City</th><th style={thStyle}>State</th><th style={thStyle}>Shipments</th>
+                        <th style={thStyle}>Total CIF $</th><th style={thStyle}>Avg Order $</th><th style={thStyle}>Type</th>
+                        <th style={thStyle}>Priority</th><th style={thStyle}>China %</th><th style={thStyle}>Status</th>
+                      </tr></thead>
+                      <tbody>{filteredBuyers.map((b, i) => (
+                        <tr key={b.id || i} style={{ background: i % 2 === 0 ? 'transparent' : 'rgba(96,165,250,0.02)' }}>
+                          <td style={{ ...tdStyle, fontWeight: 700, color: COLORS.blue, cursor: 'pointer' }} onClick={() => setBlueprintHS4(b.hs4)}>{b.hs4}</td>
+                          <td style={{ ...tdStyle, fontWeight: 600, color: '#e2e8f0', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={b.company_name}>{b.company_name}</td>
+                          <td style={{ ...tdStyle, fontFamily: 'monospace', fontSize: '10px' }}>{b.iec || '—'}</td>
+                          <td style={tdStyle}>{b.city || '—'}</td>
+                          <td style={tdStyle}>{b.state || '—'}</td>
+                          <td style={{ ...tdStyle, fontWeight: 600 }}>{b.shipment_count || 0}</td>
+                          <td style={{ ...tdStyle, fontWeight: 600 }}>${(b.total_cif_usd || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
+                          <td style={tdStyle}>${(b.avg_order_value_usd || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
+                          <td style={tdStyle}><Badge label={b.company_type || 'N/A'} /></td>
+                          <td style={tdStyle}><span style={{ padding: '2px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 700, background: b.priority === 'A' ? RGB.pass : b.priority === 'B' ? RGB.blue : RGB.maybe, color: b.priority === 'A' ? COLORS.pass : b.priority === 'B' ? COLORS.blue : COLORS.maybe }}>{b.priority}</span></td>
+                          <td style={{ ...tdStyle, color: (b.china_pct || 0) > 60 ? COLORS.pass : '#94a3b8' }}>{(b.china_pct || 0).toFixed(0)}%</td>
+                          <td style={tdStyle}><Badge label={b.contact_status || 'NEW'} /></td>
+                        </tr>
+                      ))}</tbody>
+                    </table>
+                  </div>
+                </Card>
+
+                {/* Buyer City Distribution */}
+                <Card title="Buyer Concentration by City" emoji="🏙️" style={{ marginTop: '20px' }}>
+                  {(() => {
+                    const cityMap = {};
+                    filteredBuyers.forEach(b => { const c = b.city || 'Unknown'; cityMap[c] = (cityMap[c] || 0) + 1; });
+                    const cityData = Object.entries(cityMap).sort((a, b) => b[1] - a[1]).slice(0, 15).map(([city, count]) => ({ city, count }));
+                    return (
+                      <ResponsiveContainer width="100%" height={300}>
+                        <BarChart data={cityData}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.06)" />
+                          <XAxis dataKey="city" tick={{ fontSize: 10, fill: '#94a3b8' }} angle={-30} textAnchor="end" height={80} />
+                          <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} />
+                          <Tooltip contentStyle={{ background: '#1a2035', border: '1px solid rgba(148,163,184,0.1)', borderRadius: '8px', fontSize: '12px' }} />
+                          <Bar dataKey="count" name="Buyers" fill={COLORS.blue} radius={[6, 6, 0, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    );
+                  })()}
+                </Card>
+              </div>
+            )}
+
+            {/* SUPPLIERS SUB-VIEW */}
+            {blueprintView === 'suppliers' && (
+              <div>
+                <Card title="China Supplier Database — Sourcing Partners" emoji="🏭">
+                  {chinaSuppliers.length === 0 ? (
+                    <div style={{ textAlign: 'center', padding: '60px', color: '#64748b' }}>
+                      <div style={{ fontSize: '48px', marginBottom: '16px' }}>🏗️</div>
+                      <div style={{ fontSize: '16px', color: '#94a3b8', marginBottom: '8px' }}>China Supplier Database — Coming Soon</div>
+                      <div style={{ fontSize: '13px', maxWidth: '500px', margin: '0 auto', lineHeight: 1.6 }}>
+                        This table will be populated with verified suppliers from Alibaba, Made-in-China, and DHgate as we research each HS8 sub-code.
+                        Each supplier gets: FOB pricing, MOQ, lead time, Gold Supplier status, Trade Assurance availability, and factory verification details.
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px', marginTop: '24px', maxWidth: '600px', margin: '24px auto 0' }}>
+                        <div style={{ background: '#1a2035', borderRadius: '10px', padding: '16px' }}>
+                          <div style={{ fontSize: '24px', marginBottom: '4px' }}>🔍</div>
+                          <div style={{ fontSize: '12px', color: '#e2e8f0', fontWeight: 600 }}>Research Phase</div>
+                          <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>Browser visits to Alibaba, MIC, DHgate for each HS8 keyword</div>
+                        </div>
+                        <div style={{ background: '#1a2035', borderRadius: '10px', padding: '16px' }}>
+                          <div style={{ fontSize: '24px', marginBottom: '4px' }}>✅</div>
+                          <div style={{ fontSize: '12px', color: '#e2e8f0', fontWeight: 600 }}>Verification</div>
+                          <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>Gold Supplier, Trade Assurance, factory inspection reports</div>
+                        </div>
+                        <div style={{ background: '#1a2035', borderRadius: '10px', padding: '16px' }}>
+                          <div style={{ fontSize: '24px', marginBottom: '4px' }}>📋</div>
+                          <div style={{ fontSize: '12px', color: '#e2e8f0', fontWeight: 600 }}>27 Fields</div>
+                          <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>FOB, MOQ, lead time, payment terms, delivery rate, priority</div>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ border: '1px solid rgba(148,163,184,0.08)', borderRadius: '12px', overflow: 'hidden', maxHeight: '600px', overflowY: 'auto' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                        <thead><tr>
+                          <th style={thStyle}>HS4</th><th style={{ ...thStyle, minWidth: '180px' }}>Supplier</th><th style={thStyle}>Platform</th>
+                          <th style={thStyle}>Location</th><th style={thStyle}>Gold</th><th style={thStyle}>FOB Range $</th>
+                          <th style={thStyle}>MOQ</th><th style={thStyle}>Lead Time</th><th style={thStyle}>Priority</th>
+                        </tr></thead>
+                        <tbody>{filteredSuppliers.map((s, i) => (
+                          <tr key={s.id || i} style={{ background: i % 2 === 0 ? 'transparent' : 'rgba(96,165,250,0.02)' }}>
+                            <td style={{ ...tdStyle, fontWeight: 700, color: COLORS.blue }}>{s.hs4}</td>
+                            <td style={{ ...tdStyle, fontWeight: 600, color: '#e2e8f0' }}>{s.supplier_name}</td>
+                            <td style={tdStyle}><Badge label={s.platform || 'N/A'} /></td>
+                            <td style={tdStyle}>{s.location || '—'}</td>
+                            <td style={tdStyle}>{s.is_gold_supplier ? <span style={{ color: COLORS.pass }}>✓ Gold</span> : '—'}</td>
+                            <td style={tdStyle}>${s.fob_low_usd || '?'} - ${s.fob_high_usd || '?'}</td>
+                            <td style={tdStyle}>{s.moq || '—'}</td>
+                            <td style={tdStyle}>{s.lead_time || '—'}</td>
+                            <td style={tdStyle}><Badge label={s.priority || 'N/A'} /></td>
+                          </tr>
+                        ))}</tbody>
+                      </table>
+                    </div>
+                  )}
+                </Card>
+              </div>
+            )}
+
+            {/* SUPPLY CHAIN PLAN SUB-VIEW */}
+            {blueprintView === 'plan' && (
+              <div>
+                <Card title="Supply Chain Entry Plan — Full Execution Roadmap" emoji="📋">
+                  <div style={{ border: '1px solid rgba(148,163,184,0.08)', borderRadius: '12px', overflow: 'hidden', maxHeight: '500px', overflowY: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                      <thead><tr>
+                        <th style={thStyle}>HS4</th><th style={{ ...thStyle, minWidth: '140px' }}>Commodity</th><th style={thStyle}>Score</th>
+                        <th style={thStyle}>Verdict</th><th style={thStyle}>Model</th><th style={thStyle}>Market $M</th>
+                        <th style={thStyle}>Margin %</th><th style={thStyle}>WC ₹L</th><th style={thStyle}>ROI Y1</th>
+                        <th style={thStyle}>Risk</th><th style={thStyle}>Buyers</th><th style={thStyle}>Source</th>
+                      </tr></thead>
+                      <tbody>{filteredPlans.map((p, i) => (
+                        <tr key={p.id || i} style={{ background: i % 2 === 0 ? 'transparent' : 'rgba(96,165,250,0.02)' }}>
+                          <td style={{ ...tdStyle, fontWeight: 700, color: COLORS.blue, cursor: 'pointer' }} onClick={() => { setBlueprintHS4(p.hs4); setBlueprintView('margins'); }}>{p.hs4}</td>
+                          <td style={{ ...tdStyle, maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={p.commodity}>{p.commodity}</td>
+                          <td style={{ ...tdStyle, fontWeight: 700, color: (p.final_score || 0) >= 120 ? COLORS.pass : (p.final_score || 0) >= 90 ? COLORS.blue : COLORS.maybe }}>{p.final_score}/150</td>
+                          <td style={tdStyle}><Badge label={p.final_verdict || 'N/A'} /></td>
+                          <td style={tdStyle}><span style={{ color: MODEL_COLORS[p.trading_model] || '#94a3b8', fontWeight: 600, fontSize: '11px' }}>{p.trading_model || '—'}</span></td>
+                          <td style={{ ...tdStyle, fontWeight: 600 }}>${(p.market_size_usd_m || 0).toFixed(0)}</td>
+                          <td style={{ ...tdStyle, fontWeight: 600, color: (p.gross_margin_pct || 0) > 30 ? COLORS.pass : (p.gross_margin_pct || 0) > 15 ? COLORS.blue : COLORS.maybe }}>{(p.gross_margin_pct || 0).toFixed(1)}%</td>
+                          <td style={tdStyle}>₹{((p.working_capital_required_inr || 0) / 100000).toFixed(1)}</td>
+                          <td style={{ ...tdStyle, color: (p.roi_year1_pct || 0) > 100 ? COLORS.pass : COLORS.blue }}>{(p.roi_year1_pct || 0).toFixed(0)}%</td>
+                          <td style={tdStyle}><Badge label={p.risk_level || 'N/A'} /></td>
+                          <td style={tdStyle}>{p.target_buyer_count || 0}</td>
+                          <td style={{ ...tdStyle, fontSize: '10px' }}>{p.primary_source_country || '—'}</td>
+                        </tr>
+                      ))}</tbody>
+                    </table>
+                  </div>
+                </Card>
+
+                {/* Detailed Plan Cards for PURSUE products */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: '20px', marginTop: '20px' }}>
+                  {filteredPlans.filter(p => p.final_verdict === 'PURSUE' || p.final_verdict === 'STRONG').slice(0, 8).map(p => (
+                    <Card key={p.hs4} title={`${p.hs4} — ${p.commodity}`} emoji="🎯">
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '12px', marginBottom: '12px' }}>
+                        <div><span style={{ color: '#64748b' }}>Score:</span> <span style={{ color: COLORS.pass, fontWeight: 700 }}>{p.final_score}/150</span></div>
+                        <div><span style={{ color: '#64748b' }}>Verdict:</span> <Badge label={p.final_verdict} /></div>
+                        <div><span style={{ color: '#64748b' }}>Model:</span> <span style={{ color: MODEL_COLORS[p.trading_model] || '#94a3b8', fontWeight: 600 }}>{p.trading_model}</span></div>
+                        <div><span style={{ color: '#64748b' }}>Market:</span> <span style={{ color: '#e2e8f0' }}>${(p.market_size_usd_m || 0).toFixed(0)}M</span></div>
+                        <div><span style={{ color: '#64748b' }}>Margin:</span> <span style={{ color: COLORS.pass, fontWeight: 600 }}>{(p.gross_margin_pct || 0).toFixed(1)}%</span></div>
+                        <div><span style={{ color: '#64748b' }}>WC:</span> <span style={{ color: '#e2e8f0' }}>₹{((p.working_capital_required_inr || 0) / 100000).toFixed(1)}L</span></div>
+                        <div><span style={{ color: '#64748b' }}>Break Even:</span> <span style={{ color: '#e2e8f0' }}>{p.break_even_months || '?'} months</span></div>
+                        <div><span style={{ color: '#64748b' }}>ROI Y1:</span> <span style={{ color: COLORS.pass, fontWeight: 600 }}>{(p.roi_year1_pct || 0).toFixed(0)}%</span></div>
+                      </div>
+                      <div style={{ fontSize: '11px', color: '#94a3b8', lineHeight: 1.6 }}>
+                        <div style={{ display: 'flex', gap: '6px', marginBottom: '4px' }}>
+                          <span style={{ color: '#64748b', minWidth: '55px' }}>Source:</span>
+                          <span>{p.primary_source_country || 'China'} via {p.primary_source_platform || 'Alibaba'}</span>
+                        </div>
+                        <div style={{ display: 'flex', gap: '6px', marginBottom: '4px' }}>
+                          <span style={{ color: '#64748b', minWidth: '55px' }}>Incoterms:</span>
+                          <span>{p.recommended_incoterms || 'FOB'} / {p.recommended_payment || 'T/T 30%'}</span>
+                        </div>
+                        <div style={{ display: 'flex', gap: '6px', marginBottom: '4px' }}>
+                          <span style={{ color: '#64748b', minWidth: '55px' }}>Certs:</span>
+                          <span>{p.certifications_needed || 'None'}</span>
+                        </div>
+                        <div style={{ display: 'flex', gap: '6px', marginBottom: '4px' }}>
+                          <span style={{ color: '#64748b', minWidth: '55px' }}>Sales:</span>
+                          <span>{p.sales_channel || 'Direct'} — {p.primary_buyer_cities || 'Various'}</span>
+                        </div>
+                      </div>
+                      {/* Phase Roadmap */}
+                      <div style={{ marginTop: '12px', borderTop: '1px solid rgba(148,163,184,0.08)', paddingTop: '12px' }}>
+                        <div style={{ fontSize: '11px', fontWeight: 600, color: '#e2e8f0', marginBottom: '8px' }}>Execution Roadmap</div>
+                        {[{ label: 'Phase 1 (0-3 mo)', text: p.phase1_action, color: COLORS.pass },
+                          { label: 'Phase 2 (3-6 mo)', text: p.phase2_action, color: COLORS.blue },
+                          { label: 'Phase 3 (6-12 mo)', text: p.phase3_action, color: COLORS.cyan }]
+                          .filter(ph => ph.text).map((ph, j) => (
+                          <div key={j} style={{ display: 'flex', gap: '8px', marginBottom: '6px', fontSize: '11px' }}>
+                            <span style={{ color: ph.color, fontWeight: 600, minWidth: '95px', flexShrink: 0 }}>{ph.label}</span>
+                            <span style={{ color: '#94a3b8' }}>{ph.text}</span>
+                          </div>
+                        ))}
+                      </div>
+                      {/* Risk */}
+                      {p.key_risks && (
+                        <div style={{ marginTop: '8px', fontSize: '11px', background: 'rgba(248,113,113,0.06)', borderRadius: '6px', padding: '8px' }}>
+                          <span style={{ color: COLORS.drop, fontWeight: 600 }}>Risks:</span> <span style={{ color: '#94a3b8' }}>{p.key_risks}</span>
+                        </div>
+                      )}
+                    </Card>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         );
       })()}
