@@ -137,6 +137,14 @@ export default function ElectronicsResearch() {
   const [selectedVolzaHS4, setSelectedVolzaHS4] = useState(null);
   const [analyticsFilters, setAnalyticsFilters] = useState({ marginTier: '', marketSize: '', regRisk: '', tradingModel: '', bisReq: '', certCount: '' });
   const [volzaQueue, setVolzaQueue] = useState([]);
+  // New deep-dive analytics tables (7 tables)
+  const [hs8Breakdown, setHs8Breakdown] = useState([]);
+  const [countryMix, setCountryMix] = useState([]);
+  const [monthlyTrend, setMonthlyTrend] = useState([]);
+  const [buyerSegments, setBuyerSegments] = useState([]);
+  const [topShippers, setTopShippers] = useState([]);
+  const [portAnalysis, setPortAnalysis] = useState([]);
+  const [priceStats, setPriceStats] = useState([]);
   // Shipments sort/filter
   const [shipmentSort, setShipmentSort] = useState('date');
   const [shipmentSortDir, setShipmentSortDir] = useState('desc');
@@ -167,7 +175,8 @@ export default function ElectronicsResearch() {
     const fetchData = async () => {
       try {
         setLoading(true);
-        const [codesRes, regRes, supRes, demRes, scorRes, p4Res, vsRes, vbRes, vh8Res, vtbRes, queueRes] = await Promise.all([
+        const [codesRes, regRes, supRes, demRes, scorRes, p4Res, vsRes, vbRes, vh8Res, vtbRes, queueRes,
+               hs8bRes, cmRes, mtRes, bsRes, tsRes, paRes, psRes] = await Promise.all([
           supabase.from('research_codes').select('*').order('drill_score', { ascending: false }),
           supabase.from('phase2b_regulatory').select('*'),
           supabase.from('phase2_alibaba_summary').select('*'),
@@ -179,6 +188,13 @@ export default function ElectronicsResearch() {
           supabase.from('volza_hs8_detail').select('*'),
           supabase.from('volza_top_buyers').select('*'),
           supabase.from('volza_scrape_queue').select('*'),
+          supabase.from('volza_hs8_breakdown').select('*'),
+          supabase.from('volza_country_mix').select('*'),
+          supabase.from('volza_monthly_trend').select('*'),
+          supabase.from('volza_buyer_segments').select('*'),
+          supabase.from('volza_top_shippers').select('*'),
+          supabase.from('volza_port_analysis').select('*'),
+          supabase.from('volza_price_stats').select('*'),
         ]);
         setCodes(codesRes.data || []);
         setRegulatory(regRes.data || []);
@@ -191,6 +207,13 @@ export default function ElectronicsResearch() {
         setVolzaHS8Detail(vh8Res.data || []);
         setVolzaTopBuyers(vtbRes.data || []);
         setVolzaQueue(queueRes.data || []);
+        setHs8Breakdown(hs8bRes.data || []);
+        setCountryMix(cmRes.data || []);
+        setMonthlyTrend(mtRes.data || []);
+        setBuyerSegments(bsRes.data || []);
+        setTopShippers(tsRes.data || []);
+        setPortAnalysis(paRes.data || []);
+        setPriceStats(psRes.data || []);
       } catch (err) { console.error('Fetch error:', err); }
       finally { setLoading(false); }
     };
@@ -207,6 +230,13 @@ export default function ElectronicsResearch() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'volza_hs8_detail' }, () => fetchData())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'volza_top_buyers' }, () => fetchData())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'volza_scrape_queue' }, () => fetchData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'volza_hs8_breakdown' }, () => fetchData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'volza_country_mix' }, () => fetchData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'volza_monthly_trend' }, () => fetchData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'volza_buyer_segments' }, () => fetchData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'volza_top_shippers' }, () => fetchData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'volza_port_analysis' }, () => fetchData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'volza_price_stats' }, () => fetchData())
       .subscribe();
     return () => sub.unsubscribe();
   }, []);
@@ -424,6 +454,15 @@ export default function ElectronicsResearch() {
   const volzaBuyersSF = useSortFilter(buyerDataForView, 'total_cif_usd', 'desc');
   const volzaP4SF = useSortFilter(volzaComputed.p4Data, 'total_shipments', 'desc');
   const volzaQSF = useSortFilter(volzaComputed.queueDataForView, 'priority', 'asc');
+  // New deep-dive sort/filter hooks
+  const hs8BreakdownForView = selectedVolzaHS4 ? hs8Breakdown.filter(h => h.hs4 === selectedVolzaHS4) : hs8Breakdown;
+  const hs8bSF = useSortFilter(hs8BreakdownForView, 'total_cif_usd', 'desc');
+  const countryForView = selectedVolzaHS4 ? countryMix.filter(c => c.hs4 === selectedVolzaHS4) : countryMix;
+  const countrySF = useSortFilter(countryForView, 'total_cif_usd', 'desc');
+  const shipperForView = selectedVolzaHS4 ? topShippers.filter(s => s.hs4 === selectedVolzaHS4) : topShippers;
+  const shipperSF = useSortFilter(shipperForView, 'total_cif_usd', 'desc');
+  const portForView = selectedVolzaHS4 ? portAnalysis.filter(p => p.hs4 === selectedVolzaHS4) : portAnalysis;
+  const portSF = useSortFilter(portForView, 'shipment_count', 'desc');
 
   const tabs = [
     { id: 'analytics', label: '🔍 Analytics Deep Dive' },
@@ -1349,12 +1388,16 @@ export default function ElectronicsResearch() {
         } : null;
 
         const VOLZA_VIEWS = [
-          { key: 'dashboard', icon: '📊', label: 'Dashboard' },
+          { key: 'dashboard', icon: '📊', label: 'Overview' },
           { key: 'matrix', icon: '📋', label: 'Code Matrix' },
-          { key: 'hs8deep', icon: '🔬', label: 'HS8 Analysis' },
-          { key: 'buyers', icon: '👥', label: 'Buyer Intel' },
-          { key: 'xref', icon: '🔍', label: 'Research X-Ref' },
-          { key: 'phase4', icon: '📋', label: 'Phase 4' },
+          { key: 'hs8deep', icon: '🔬', label: 'HS8 Products' },
+          { key: 'countries', icon: '🌍', label: 'Countries' },
+          { key: 'buyers', icon: '👥', label: 'Buyers' },
+          { key: 'shippers', icon: '🚢', label: 'Shippers' },
+          { key: 'ports', icon: '🏗️', label: 'Ports' },
+          { key: 'prices', icon: '💰', label: 'Pricing' },
+          { key: 'trends', icon: '📈', label: 'Trends' },
+          { key: 'xref', icon: '🔍', label: 'X-Ref' },
           { key: 'queue', icon: '📑', label: 'Queue' },
         ];
 
@@ -1373,14 +1416,26 @@ export default function ElectronicsResearch() {
             </div>
 
             {/* GLOBAL KPI ROW */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '14px', marginBottom: '24px' }}>
-              <KPI label="Total Shipments" value={totalShipmentCount.toLocaleString()} variant="blue" sub={`${hs4List.length} HS4 codes`} />
-              <KPI label="Total CIF Value" value={`$${(totalCIF / 1e6).toFixed(2)}M`} variant="pass" />
-              <KPI label="Unique Buyers" value={totalBuyerCount.toLocaleString()} variant="cyan" />
-              <KPI label="Unique Shippers" value={totalShipperCount.toLocaleString()} variant="orange" />
-              <KPI label="P4 Completed" value={p4Data.filter(p => p.completed_at).length} variant="watch" sub={`of ${volzaQueue.length} queued`} />
-              <KPI label="Avg Margin %" value={`${(unifiedCodes.reduce((a, c) => a + (c.gross_margin_pct || 0), 0) / (unifiedCodes.length || 1)).toFixed(1)}%`} variant="pass" sub="Across scraped codes" />
-            </div>
+            {(() => {
+              const allP4 = p4Data.filter(p => p.completed_at);
+              const totalShip = allP4.reduce((a, p) => a + (p.total_shipments || 0), 0);
+              const totalBuy = allP4.reduce((a, p) => a + (p.unique_buyers || 0), 0);
+              const totalShip2 = allP4.reduce((a, p) => a + (p.unique_shippers || 0), 0);
+              const totalCIF2 = volzaTopBuyers.reduce((a, b) => a + (b.total_cif_usd || 0), 0);
+              const hs8Count = hs8Breakdown.length;
+              const countryCount = [...new Set(countryMix.map(c => c.country))].length;
+              return (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '14px', marginBottom: '24px' }}>
+                  <KPI label="HS4 Codes Scraped" value={allP4.length} variant="blue" sub={`of ${volzaQueue.length} queued`} />
+                  <KPI label="Total Shipments" value={totalShip.toLocaleString()} variant="cyan" />
+                  <KPI label="Total CIF" value={`$${(totalCIF2 / 1e6).toFixed(1)}M`} variant="pass" />
+                  <KPI label="Unique Buyers" value={totalBuy.toLocaleString()} variant="blue" />
+                  <KPI label="HS8 Sub-codes" value={hs8Count} variant="watch" sub={`${countryCount} countries`} />
+                  <KPI label="Source Countries" value={countryCount} variant="orange" />
+                  <KPI label="Avg Margin" value={`${(unifiedCodes.reduce((a, c) => a + (c.gross_margin_pct || 0), 0) / (unifiedCodes.length || 1)).toFixed(1)}%`} variant="pass" />
+                </div>
+              );
+            })()}
 
             {/* ===== DASHBOARD VIEW ===== */}
             {volzaView === 'dashboard' && (
@@ -1627,6 +1682,269 @@ export default function ElectronicsResearch() {
                   </div>
                 </div>
               );
+            })()}
+
+            {/* ===== COUNTRIES VIEW — Source country analysis ===== */}
+            {volzaView === 'countries' && (() => {
+              const cData = countrySF.sorted;
+              const totalCIF3 = cData.reduce((a, c) => a + (Number(c.total_cif_usd) || 0), 0);
+              const totalShipC = cData.reduce((a, c) => a + (c.shipment_count || 0), 0);
+              const top10 = [...cData].sort((a, b) => (Number(b.total_cif_usd) || 0) - (Number(a.total_cif_usd) || 0)).slice(0, 10);
+              return (<div>
+                <div style={{ display: 'flex', gap: '12px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
+                  <select value={selectedVolzaHS4 || ''} onChange={e => setSelectedVolzaHS4(e.target.value || null)} style={{ padding: '8px 12px', background: '#1a2035', border: '1px solid rgba(148,163,184,0.1)', borderRadius: '8px', color: '#e2e8f0', fontSize: '13px', minWidth: '250px' }}>
+                    <option value="">All HS4 Codes</option>
+                    {[...new Set(countryMix.map(c => c.hs4))].sort().map(h4 => <option key={h4} value={h4}>HS4 {h4}</option>)}
+                  </select>
+                  <input type="text" placeholder="Search country..." value={countrySF.search} onChange={e => countrySF.setSearch(e.target.value)} style={{ padding: '8px 12px', background: '#1a2035', border: '1px solid rgba(148,163,184,0.1)', borderRadius: '8px', color: '#e2e8f0', fontSize: '12px', minWidth: '200px' }} />
+                  <span style={{ fontSize: '12px', color: '#64748b' }}>{cData.length} entries | {totalShipC.toLocaleString()} shipments | ${(totalCIF3 / 1e6).toFixed(2)}M CIF</span>
+                </div>
+                {top10.length > 0 && <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '24px' }}>
+                  <Card title="Top Countries by CIF" emoji="🌍">
+                    <ResponsiveContainer width="100%" height={300}>
+                      <BarChart data={top10.map(c => ({ name: c.country, cif: (Number(c.total_cif_usd) || 0) / 1e6, shipments: c.shipment_count }))} layout="vertical"><CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.1)" /><XAxis type="number" stroke="#94a3b8" fontSize={11} /><YAxis type="category" dataKey="name" width={100} stroke="#94a3b8" fontSize={10} /><Tooltip contentStyle={tooltipStyle} formatter={v => `$${Number(v).toFixed(2)}M`} /><Bar dataKey="cif" fill={COLORS.blue} radius={[0, 4, 4, 0]} name="CIF $M" /></BarChart>
+                    </ResponsiveContainer>
+                  </Card>
+                  <Card title="Shipments by Country" emoji="📦">
+                    <ResponsiveContainer width="100%" height={300}>
+                      <PieChart><Pie data={top10.map(c => ({ name: c.country, value: c.shipment_count || 0 }))} cx="50%" cy="50%" innerRadius={50} outerRadius={110} paddingAngle={2} dataKey="value" label={({ name, value }) => `${name}: ${value}`}>{top10.map((_, i) => <Cell key={i} fill={[COLORS.blue, COLORS.cyan, COLORS.pass, COLORS.maybe, COLORS.watch, COLORS.orange, COLORS.drop, '#94a3b8', '#64748b', '#475569'][i % 10]} />)}</Pie><Tooltip contentStyle={tooltipStyle} /></PieChart>
+                    </ResponsiveContainer>
+                  </Card>
+                </div>}
+                <div style={{ border: '1px solid rgba(148,163,184,0.08)', borderRadius: '12px', overflow: 'hidden', maxHeight: '600px', overflowY: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                    <thead><tr>
+                      <SortHeader label="HS4" field="hs4" {...countrySF} />
+                      <SortHeader label="Country" field="country" {...countrySF} />
+                      <SortHeader label="Shipments" field="shipment_count" {...countrySF} />
+                      <SortHeader label="Buyers" field="buyer_count" {...countrySF} />
+                      <SortHeader label="CIF $" field="total_cif_usd" {...countrySF} />
+                      <SortHeader label="CIF %" field="cif_share_pct" {...countrySF} />
+                      <SortHeader label="Avg Rate $" field="avg_unit_rate_usd" {...countrySF} />
+                      <SortHeader label="Shippers" field="shipper_count" {...countrySF} />
+                      <SortHeader label="Rank" field="rank_in_hs4" {...countrySF} />
+                    </tr></thead>
+                    <tbody>{cData.map((c, i) => (
+                      <tr key={i} style={{ background: i % 2 === 0 ? 'transparent' : 'rgba(96,165,250,0.02)' }} onMouseEnter={e => e.currentTarget.style.background = 'rgba(96,165,250,0.04)'} onMouseLeave={e => e.currentTarget.style.background = i % 2 === 0 ? 'transparent' : 'rgba(96,165,250,0.02)'}>
+                        <td style={{ ...tdStyle, fontWeight: 600, color: COLORS.blue }}>{c.hs4}</td>
+                        <td style={{ ...tdStyle, fontWeight: 700, color: COLORS.cyan }}>{c.country}</td>
+                        <td style={{ ...tdStyle, fontWeight: 600 }}>{(c.shipment_count || 0).toLocaleString()}</td>
+                        <td style={tdStyle}>{c.buyer_count || 0}</td>
+                        <td style={{ ...tdStyle, fontWeight: 600 }}>${((Number(c.total_cif_usd) || 0) / 1000).toFixed(1)}K</td>
+                        <td style={{ ...tdStyle, color: (c.cif_share_pct || 0) > 30 ? COLORS.pass : COLORS.maybe }}>{(c.cif_share_pct || 0).toFixed(1)}%</td>
+                        <td style={tdStyle}>${(c.avg_unit_rate_usd || 0).toFixed(2)}</td>
+                        <td style={tdStyle}>{c.shipper_count || 0}</td>
+                        <td style={tdStyle}>{c.rank_in_hs4 || '—'}</td>
+                      </tr>
+                    ))}</tbody>
+                  </table>
+                </div>
+              </div>);
+            })()}
+
+            {/* ===== SHIPPERS VIEW ===== */}
+            {volzaView === 'shippers' && (() => {
+              const sData = shipperSF.sorted;
+              return (<div>
+                <div style={{ display: 'flex', gap: '12px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
+                  <select value={selectedVolzaHS4 || ''} onChange={e => setSelectedVolzaHS4(e.target.value || null)} style={{ padding: '8px 12px', background: '#1a2035', border: '1px solid rgba(148,163,184,0.1)', borderRadius: '8px', color: '#e2e8f0', fontSize: '13px', minWidth: '250px' }}>
+                    <option value="">All HS4 Codes</option>
+                    {[...new Set(topShippers.map(s => s.hs4))].sort().map(h4 => <option key={h4} value={h4}>HS4 {h4}</option>)}
+                  </select>
+                  <input type="text" placeholder="Search shipper..." value={shipperSF.search} onChange={e => shipperSF.setSearch(e.target.value)} style={{ padding: '8px 12px', background: '#1a2035', border: '1px solid rgba(148,163,184,0.1)', borderRadius: '8px', color: '#e2e8f0', fontSize: '12px', minWidth: '200px' }} />
+                  <span style={{ fontSize: '12px', color: '#64748b' }}>{sData.length} shippers</span>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '12px', marginBottom: '20px' }}>
+                  <Metric label="Total Shippers" value={sData.length} color={COLORS.blue} />
+                  <Metric label="Total CIF" value={`$${(sData.reduce((a, s) => a + (Number(s.total_cif_usd) || 0), 0) / 1e6).toFixed(2)}M`} color={COLORS.pass} />
+                  <Metric label="Unique Countries" value={[...new Set(sData.map(s => s.primary_country).filter(Boolean))].length} color={COLORS.cyan} />
+                  <Metric label="Avg Buyers/Shipper" value={(sData.reduce((a, s) => a + (s.buyer_count || 0), 0) / (sData.length || 1)).toFixed(1)} color={COLORS.maybe} />
+                </div>
+                <div style={{ border: '1px solid rgba(148,163,184,0.08)', borderRadius: '12px', overflow: 'hidden', maxHeight: '700px', overflowY: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                    <thead><tr>
+                      <SortHeader label="Rank" field="rank_in_hs4" {...shipperSF} />
+                      <SortHeader label="Shipper" field="shipper_name" {...shipperSF} />
+                      <SortHeader label="HS4" field="hs4" {...shipperSF} />
+                      <SortHeader label="Shipments" field="shipment_count" {...shipperSF} />
+                      <SortHeader label="CIF $" field="total_cif_usd" {...shipperSF} />
+                      <SortHeader label="Buyers" field="buyer_count" {...shipperSF} />
+                      <SortHeader label="Country" field="primary_country" {...shipperSF} />
+                    </tr></thead>
+                    <tbody>{sData.map((s, i) => (
+                      <tr key={i} style={{ background: i % 2 === 0 ? 'transparent' : 'rgba(96,165,250,0.02)' }} onMouseEnter={e => e.currentTarget.style.background = 'rgba(96,165,250,0.04)'} onMouseLeave={e => e.currentTarget.style.background = i % 2 === 0 ? 'transparent' : 'rgba(96,165,250,0.02)'}>
+                        <td style={{ ...tdStyle, fontWeight: 700, color: COLORS.blue }}>{s.rank_in_hs4 || i + 1}</td>
+                        <td style={{ ...tdStyle, fontWeight: 600, color: COLORS.cyan, maxWidth: '250px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={s.shipper_name}>{s.shipper_name}</td>
+                        <td style={{ ...tdStyle, color: COLORS.blue, fontWeight: 600 }}>{s.hs4}</td>
+                        <td style={{ ...tdStyle, fontWeight: 600 }}>{(s.shipment_count || 0).toLocaleString()}</td>
+                        <td style={{ ...tdStyle, fontWeight: 600 }}>${((Number(s.total_cif_usd) || 0) / 1000).toFixed(1)}K</td>
+                        <td style={tdStyle}>{s.buyer_count || 0}</td>
+                        <td style={tdStyle}>{s.primary_country || '—'}</td>
+                      </tr>
+                    ))}</tbody>
+                  </table>
+                </div>
+              </div>);
+            })()}
+
+            {/* ===== PORTS VIEW ===== */}
+            {volzaView === 'ports' && (() => {
+              const pData = portSF.sorted;
+              const totalShipP = pData.reduce((a, p) => a + (p.shipment_count || 0), 0);
+              const top10p = [...pData].sort((a, b) => (b.shipment_count || 0) - (a.shipment_count || 0)).slice(0, 10);
+              return (<div>
+                <div style={{ display: 'flex', gap: '12px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
+                  <select value={selectedVolzaHS4 || ''} onChange={e => setSelectedVolzaHS4(e.target.value || null)} style={{ padding: '8px 12px', background: '#1a2035', border: '1px solid rgba(148,163,184,0.1)', borderRadius: '8px', color: '#e2e8f0', fontSize: '13px', minWidth: '250px' }}>
+                    <option value="">All HS4 Codes</option>
+                    {[...new Set(portAnalysis.map(p => p.hs4))].sort().map(h4 => <option key={h4} value={h4}>HS4 {h4}</option>)}
+                  </select>
+                  <input type="text" placeholder="Search port..." value={portSF.search} onChange={e => portSF.setSearch(e.target.value)} style={{ padding: '8px 12px', background: '#1a2035', border: '1px solid rgba(148,163,184,0.1)', borderRadius: '8px', color: '#e2e8f0', fontSize: '12px', minWidth: '200px' }} />
+                  <span style={{ fontSize: '12px', color: '#64748b' }}>{pData.length} port entries | {totalShipP.toLocaleString()} shipments</span>
+                </div>
+                {top10p.length > 0 && <Card title="Top Ports by Shipment Volume" emoji="🏗️" style={{ marginBottom: '20px' }}>
+                  <ResponsiveContainer width="100%" height={300}>
+                    <BarChart data={top10p.map(p => ({ name: p.port_name, shipments: p.shipment_count, cif: (Number(p.total_cif_usd) || 0) / 1e6 }))} layout="vertical"><CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.1)" /><XAxis type="number" stroke="#94a3b8" fontSize={11} /><YAxis type="category" dataKey="name" width={120} stroke="#94a3b8" fontSize={10} /><Tooltip contentStyle={tooltipStyle} /><Bar dataKey="shipments" fill={COLORS.cyan} radius={[0, 4, 4, 0]} name="Shipments" /></BarChart>
+                  </ResponsiveContainer>
+                </Card>}
+                <div style={{ border: '1px solid rgba(148,163,184,0.08)', borderRadius: '12px', overflow: 'hidden', maxHeight: '600px', overflowY: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                    <thead><tr>
+                      <SortHeader label="HS4" field="hs4" {...portSF} />
+                      <SortHeader label="Port" field="port_name" {...portSF} />
+                      <SortHeader label="Shipments" field="shipment_count" {...portSF} />
+                      <SortHeader label="CIF $" field="total_cif_usd" {...portSF} />
+                      <SortHeader label="Share %" field="shipment_share_pct" {...portSF} />
+                      <SortHeader label="Rank" field="rank_in_hs4" {...portSF} />
+                    </tr></thead>
+                    <tbody>{pData.map((p, i) => (
+                      <tr key={i} style={{ background: i % 2 === 0 ? 'transparent' : 'rgba(96,165,250,0.02)' }} onMouseEnter={e => e.currentTarget.style.background = 'rgba(96,165,250,0.04)'} onMouseLeave={e => e.currentTarget.style.background = i % 2 === 0 ? 'transparent' : 'rgba(96,165,250,0.02)'}>
+                        <td style={{ ...tdStyle, fontWeight: 600, color: COLORS.blue }}>{p.hs4}</td>
+                        <td style={{ ...tdStyle, fontWeight: 700, color: COLORS.cyan }}>{p.port_name}</td>
+                        <td style={{ ...tdStyle, fontWeight: 600 }}>{(p.shipment_count || 0).toLocaleString()}</td>
+                        <td style={{ ...tdStyle, fontWeight: 600 }}>${((Number(p.total_cif_usd) || 0) / 1000).toFixed(1)}K</td>
+                        <td style={{ ...tdStyle, color: (p.shipment_share_pct || 0) > 20 ? COLORS.pass : COLORS.maybe }}>{(p.shipment_share_pct || 0).toFixed(1)}%</td>
+                        <td style={tdStyle}>{p.rank_in_hs4 || '—'}</td>
+                      </tr>
+                    ))}</tbody>
+                  </table>
+                </div>
+              </div>);
+            })()}
+
+            {/* ===== PRICING VIEW ===== */}
+            {volzaView === 'prices' && (() => {
+              const psData = priceStats;
+              const psSorted = [...psData].sort((a, b) => (b.avg_unit_rate_usd || 0) - (a.avg_unit_rate_usd || 0));
+              return (<div>
+                <div style={{ marginBottom: '16px' }}>
+                  <span style={{ fontSize: '12px', color: '#64748b' }}>{psData.length} codes with price data</span>
+                </div>
+                {psSorted.length > 0 && <Card title="Unit Rate Distribution by HS4" emoji="💰" style={{ marginBottom: '20px' }}>
+                  <ResponsiveContainer width="100%" height={300}>
+                    <BarChart data={psSorted.map(p => ({ hs4: p.hs4, min: p.min_unit_rate_usd || 0, avg: p.avg_unit_rate_usd || 0, max: p.max_unit_rate_usd || 0, median: p.median_unit_rate_usd || 0 }))}><CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.1)" /><XAxis dataKey="hs4" stroke="#94a3b8" fontSize={11} /><YAxis stroke="#94a3b8" /><Tooltip contentStyle={tooltipStyle} formatter={v => `$${Number(v).toFixed(2)}`} /><Bar dataKey="min" fill={COLORS.drop} name="Min" stackId="a" /><Bar dataKey="median" fill={COLORS.blue} name="Median" /><Bar dataKey="avg" fill={COLORS.pass} name="Avg" /><Bar dataKey="max" fill={COLORS.maybe} name="Max" /></BarChart>
+                  </ResponsiveContainer>
+                </Card>}
+                <div style={{ border: '1px solid rgba(148,163,184,0.08)', borderRadius: '12px', overflow: 'hidden' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                    <thead><tr>
+                      <th style={thStyle}>HS4</th><th style={thStyle}>Min $</th><th style={thStyle}>P25 $</th><th style={thStyle}>Median $</th><th style={thStyle}>Avg $</th><th style={thStyle}>P75 $</th><th style={thStyle}>Max $</th><th style={thStyle}>Std Dev</th><th style={thStyle}>With Price</th>
+                    </tr></thead>
+                    <tbody>{psSorted.map((p, i) => (
+                      <tr key={i} style={{ background: i % 2 === 0 ? 'transparent' : 'rgba(96,165,250,0.02)' }}>
+                        <td style={{ ...tdStyle, fontWeight: 700, color: COLORS.blue }}>{p.hs4}</td>
+                        <td style={tdStyle}>${(p.min_unit_rate_usd || 0).toFixed(2)}</td>
+                        <td style={tdStyle}>${(p.p25_unit_rate_usd || 0).toFixed(2)}</td>
+                        <td style={{ ...tdStyle, fontWeight: 700, color: COLORS.cyan }}>${(p.median_unit_rate_usd || 0).toFixed(2)}</td>
+                        <td style={{ ...tdStyle, fontWeight: 600, color: COLORS.pass }}>${(p.avg_unit_rate_usd || 0).toFixed(2)}</td>
+                        <td style={tdStyle}>${(p.p75_unit_rate_usd || 0).toFixed(2)}</td>
+                        <td style={tdStyle}>${(p.max_unit_rate_usd || 0).toFixed(2)}</td>
+                        <td style={tdStyle}>{(p.std_dev || 0).toFixed(2)}</td>
+                        <td style={tdStyle}>{(p.total_with_price || 0).toLocaleString()}</td>
+                      </tr>
+                    ))}</tbody>
+                  </table>
+                </div>
+                {/* Buyer Segments */}
+                {buyerSegments.length > 0 && <Card title="Buyer Concentration Analysis (HHI)" emoji="📊" style={{ marginTop: '20px' }}>
+                  <div style={{ border: '1px solid rgba(148,163,184,0.08)', borderRadius: '12px', overflow: 'hidden' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                      <thead><tr>
+                        <th style={thStyle}>HS4</th><th style={thStyle}>Buyers</th><th style={thStyle}>HHI</th><th style={thStyle}>Market</th>
+                        <th style={thStyle}>Large</th><th style={thStyle}>Medium</th><th style={thStyle}>Small</th>
+                        <th style={thStyle}>Top5 %</th><th style={thStyle}>Top10 %</th><th style={thStyle}>Top20 %</th>
+                      </tr></thead>
+                      <tbody>{[...buyerSegments].sort((a, b) => (a.hhi || 0) - (b.hhi || 0)).map((b, i) => {
+                        const mkt = (b.hhi || 0) < 1500 ? 'Competitive' : (b.hhi || 0) < 2500 ? 'Moderate' : 'Concentrated';
+                        const mktColor = mkt === 'Competitive' ? COLORS.pass : mkt === 'Moderate' ? COLORS.maybe : COLORS.drop;
+                        return (<tr key={i} style={{ background: i % 2 === 0 ? 'transparent' : 'rgba(96,165,250,0.02)' }}>
+                          <td style={{ ...tdStyle, fontWeight: 700, color: COLORS.blue }}>{b.hs4}</td>
+                          <td style={{ ...tdStyle, fontWeight: 600 }}>{b.total_buyers}</td>
+                          <td style={{ ...tdStyle, fontWeight: 700, color: mktColor }}>{(b.hhi || 0).toFixed(0)}</td>
+                          <td style={tdStyle}><span style={{ color: mktColor, fontWeight: 600, fontSize: '11px' }}>{mkt}</span></td>
+                          <td style={tdStyle}>{b.large_buyers || 0} ({(b.large_pct || 0).toFixed(0)}%)</td>
+                          <td style={tdStyle}>{b.medium_buyers || 0} ({(b.medium_pct || 0).toFixed(0)}%)</td>
+                          <td style={tdStyle}>{b.small_buyers || 0} ({(b.small_pct || 0).toFixed(0)}%)</td>
+                          <td style={{ ...tdStyle, color: (b.top5_concentration_pct || 0) > 60 ? COLORS.drop : COLORS.pass }}>{(b.top5_concentration_pct || 0).toFixed(1)}%</td>
+                          <td style={tdStyle}>{(b.top10_concentration_pct || 0).toFixed(1)}%</td>
+                          <td style={tdStyle}>{(b.top20_concentration_pct || 0).toFixed(1)}%</td>
+                        </tr>);
+                      })}</tbody>
+                    </table>
+                  </div>
+                </Card>}
+              </div>);
+            })()}
+
+            {/* ===== TRENDS VIEW — Monthly analysis ===== */}
+            {volzaView === 'trends' && (() => {
+              const mtData = selectedVolzaHS4 ? monthlyTrend.filter(m => m.hs4 === selectedVolzaHS4) : monthlyTrend;
+              const mtSorted = [...mtData].sort((a, b) => String(a.month || '').localeCompare(String(b.month || '')));
+              // Aggregate by month across all HS4s
+              const byMonth = {};
+              mtSorted.forEach(m => {
+                const mo = m.month || 'Unknown';
+                if (!byMonth[mo]) byMonth[mo] = { month: mo, shipments: 0, cif: 0, buyers: 0 };
+                byMonth[mo].shipments += (m.shipment_count || 0);
+                byMonth[mo].cif += (Number(m.total_cif_usd) || 0);
+                byMonth[mo].buyers += (m.buyer_count || 0);
+              });
+              const monthlyAgg = Object.values(byMonth).sort((a, b) => a.month.localeCompare(b.month));
+              return (<div>
+                <div style={{ display: 'flex', gap: '12px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
+                  <select value={selectedVolzaHS4 || ''} onChange={e => setSelectedVolzaHS4(e.target.value || null)} style={{ padding: '8px 12px', background: '#1a2035', border: '1px solid rgba(148,163,184,0.1)', borderRadius: '8px', color: '#e2e8f0', fontSize: '13px', minWidth: '250px' }}>
+                    <option value="">All HS4 Codes (Aggregated)</option>
+                    {[...new Set(monthlyTrend.map(m => m.hs4))].sort().map(h4 => <option key={h4} value={h4}>HS4 {h4}</option>)}
+                  </select>
+                  <span style={{ fontSize: '12px', color: '#64748b' }}>{monthlyAgg.length} months | {mtData.length} entries</span>
+                </div>
+                {monthlyAgg.length > 0 && <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '24px' }}>
+                  <Card title="Monthly Shipment Volume" emoji="📈">
+                    <ResponsiveContainer width="100%" height={280}>
+                      <BarChart data={monthlyAgg}><CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.1)" /><XAxis dataKey="month" stroke="#94a3b8" fontSize={10} /><YAxis stroke="#94a3b8" /><Tooltip contentStyle={tooltipStyle} /><Bar dataKey="shipments" fill={COLORS.blue} radius={[4, 4, 0, 0]} name="Shipments" /></BarChart>
+                    </ResponsiveContainer>
+                  </Card>
+                  <Card title="Monthly CIF Value ($M)" emoji="💰">
+                    <ResponsiveContainer width="100%" height={280}>
+                      <BarChart data={monthlyAgg.map(m => ({ ...m, cifM: m.cif / 1e6 }))}><CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.1)" /><XAxis dataKey="month" stroke="#94a3b8" fontSize={10} /><YAxis stroke="#94a3b8" /><Tooltip contentStyle={tooltipStyle} formatter={v => `$${Number(v).toFixed(2)}M`} /><Bar dataKey="cifM" fill={COLORS.pass} radius={[4, 4, 0, 0]} name="CIF $M" /></BarChart>
+                    </ResponsiveContainer>
+                  </Card>
+                </div>}
+                <div style={{ border: '1px solid rgba(148,163,184,0.08)', borderRadius: '12px', overflow: 'hidden' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                    <thead><tr><th style={thStyle}>HS4</th><th style={thStyle}>Month</th><th style={thStyle}>Shipments</th><th style={thStyle}>CIF $</th><th style={thStyle}>Buyers</th><th style={thStyle}>Avg Rate $</th></tr></thead>
+                    <tbody>{mtSorted.map((m, i) => (
+                      <tr key={i} style={{ background: i % 2 === 0 ? 'transparent' : 'rgba(96,165,250,0.02)' }}>
+                        <td style={{ ...tdStyle, fontWeight: 600, color: COLORS.blue }}>{m.hs4}</td>
+                        <td style={{ ...tdStyle, fontWeight: 600 }}>{m.month}</td>
+                        <td style={{ ...tdStyle, fontWeight: 600 }}>{(m.shipment_count || 0).toLocaleString()}</td>
+                        <td style={{ ...tdStyle, fontWeight: 600 }}>${((Number(m.total_cif_usd) || 0) / 1000).toFixed(1)}K</td>
+                        <td style={tdStyle}>{m.buyer_count || 0}</td>
+                        <td style={tdStyle}>${(m.avg_unit_rate_usd || 0).toFixed(2)}</td>
+                      </tr>
+                    ))}</tbody>
+                  </table>
+                </div>
+              </div>);
             })()}
 
             {/* ===== RESEARCH CROSS-REFERENCE VIEW — All phases for one code ===== */}
