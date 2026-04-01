@@ -175,6 +175,14 @@ export default function ElectronicsResearch() {
   const [supplyChainPlan, setSupplyChainPlan] = useState([]);
   const [blueprintView, setBlueprintView] = useState('overview');
   const [blueprintHS4, setBlueprintHS4] = useState('');
+  // Comprehensive HS8 analysis tables (Command Center data)
+  const [hs8FullAnalysis, setHs8FullAnalysis] = useState([]);
+  const [hs8BuyerMatrix, setHs8BuyerMatrix] = useState([]);
+  const [hs8CountryBreak, setHs8CountryBreak] = useState([]);
+  const [hs8MonthTrends, setHs8MonthTrends] = useState([]);
+  const [hs8PriceDist, setHs8PriceDist] = useState([]);
+  const [cmdCenterView, setCmdCenterView] = useState('hs8analysis');
+  const [cmdHS4Filter, setCmdHS4Filter] = useState('');
   const PAGE_SIZE = 50;
 
   // Fetch all data
@@ -184,7 +192,8 @@ export default function ElectronicsResearch() {
         setLoading(true);
         const [codesRes, regRes, supRes, demRes, scorRes, p4Res, vsRes, vbRes, vh8Res, vtbRes, queueRes,
                hs8bRes, cmRes, mtRes, bsRes, tsRes, paRes, psRes,
-               h8mRes, btRes, csRes, scpRes] = await Promise.all([
+               h8mRes, btRes, csRes, scpRes,
+               hs8faRes, hs8bmRes, hs8cbRes, hs8mtRes, hs8pdRes] = await Promise.all([
           supabase.from('research_codes').select('*').order('drill_score', { ascending: false }),
           supabase.from('phase2b_regulatory').select('*'),
           supabase.from('phase2_alibaba_summary').select('*'),
@@ -207,6 +216,11 @@ export default function ElectronicsResearch() {
           supabase.from('buyer_targets').select('*').order('total_cif_usd', { ascending: false }),
           supabase.from('china_suppliers').select('*'),
           supabase.from('supply_chain_plan').select('*').order('final_score', { ascending: false }),
+          supabase.from('hs8_product_analysis').select('*').order('total_score', { ascending: false }),
+          supabase.from('hs8_buyer_matrix').select('*').order('total_cif_usd', { ascending: false }),
+          supabase.from('hs8_country_breakdown').select('*').order('total_cif_usd', { ascending: false }),
+          supabase.from('hs8_monthly_trends').select('*'),
+          supabase.from('hs8_price_distribution').select('*'),
         ]);
         setCodes(codesRes.data || []);
         setRegulatory(regRes.data || []);
@@ -230,6 +244,11 @@ export default function ElectronicsResearch() {
         setBuyerTargets(btRes.data || []);
         setChinaSuppliers(csRes.data || []);
         setSupplyChainPlan(scpRes.data || []);
+        setHs8FullAnalysis(hs8faRes.data || []);
+        setHs8BuyerMatrix(hs8bmRes.data || []);
+        setHs8CountryBreak(hs8cbRes.data || []);
+        setHs8MonthTrends(hs8mtRes.data || []);
+        setHs8PriceDist(hs8pdRes.data || []);
       } catch (err) { console.error('Fetch error:', err); }
       finally { setLoading(false); }
     };
@@ -257,6 +276,11 @@ export default function ElectronicsResearch() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'buyer_targets' }, () => fetchData())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'china_suppliers' }, () => fetchData())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'supply_chain_plan' }, () => fetchData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'hs8_product_analysis' }, () => fetchData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'hs8_buyer_matrix' }, () => fetchData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'hs8_country_breakdown' }, () => fetchData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'hs8_monthly_trends' }, () => fetchData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'hs8_price_distribution' }, () => fetchData())
       .subscribe();
     return () => sub.unsubscribe();
   }, []);
@@ -484,6 +508,19 @@ export default function ElectronicsResearch() {
   const portForView = selectedVolzaHS4 ? portAnalysis.filter(p => p.hs4 === selectedVolzaHS4) : portAnalysis;
   const portSF = useSortFilter(portForView, 'shipment_count', 'desc');
 
+  // Command Center HS8 sort/filter hooks
+  const cmdHs8Data = cmdHS4Filter ? hs8FullAnalysis.filter(h => h.hs4 === cmdHS4Filter) : hs8FullAnalysis;
+  const cmdHs8SF = useSortFilter(cmdHs8Data, 'total_score', 'desc');
+  const cmdBuyerData = cmdHS4Filter ? hs8BuyerMatrix.filter(b => b.hs4 === cmdHS4Filter) : hs8BuyerMatrix;
+  const cmdBuyerSF = useSortFilter(cmdBuyerData, 'total_cif_usd', 'desc');
+  const cmdCountryData = cmdHS4Filter ? hs8CountryBreak.filter(c => c.hs4 === cmdHS4Filter) : hs8CountryBreak;
+  const cmdCountrySF = useSortFilter(cmdCountryData, 'total_cif_usd', 'desc');
+  const cmdTrendData = cmdHS4Filter ? hs8MonthTrends.filter(t => t.hs4 === cmdHS4Filter) : hs8MonthTrends;
+  const cmdTrendSF = useSortFilter(cmdTrendData, 'month', 'desc');
+  const cmdPriceData = cmdHS4Filter ? hs8PriceDist.filter(p => p.hs4 === cmdHS4Filter) : hs8PriceDist;
+  const cmdPriceSF = useSortFilter(cmdPriceData, 'total_cif_usd', 'desc');
+  const cmdHS4Options = [...new Set(hs8FullAnalysis.map(h => h.hs4))].sort();
+
   const tabs = [
     { id: 'analytics', label: '🔍 Analytics Deep Dive' },
     { id: 'overview', label: '📊 Executive Overview' },
@@ -495,6 +532,7 @@ export default function ElectronicsResearch() {
     { id: 'supply', label: '🏭 Supply vs Demand' },
     { id: 'volza', label: `🚢 Volza Deep Dive (${volzaHS8Detail.reduce((a, h) => a + (h.shipment_count || 0), 0).toLocaleString()})` },
     { id: 'blueprint', label: `🗺️ Business Blueprint (${supplyChainPlan.length})` },
+    { id: 'cmdcenter', label: `🎯 Command Center (${hs8FullAnalysis.length})` },
     { id: 'allcodes', label: '📋 All 180 Codes' },
     { id: 'queue', label: '📑 Research Queue' },
   ];
@@ -2628,6 +2666,249 @@ export default function ElectronicsResearch() {
                   ))}
                 </div>
               </div>
+            )}
+          </div>
+        );
+      })()}
+
+      {/* ==================== TAB: COMMAND CENTER ==================== */}
+      {activeTab === 'cmdcenter' && (() => {
+        const CMD_VIEWS = [
+          { key: 'hs8analysis', icon: '🔬', label: `HS8 Products (${hs8FullAnalysis.length})` },
+          { key: 'buyermatrix', icon: '👥', label: `Buyer Matrix (${hs8BuyerMatrix.length})` },
+          { key: 'countrybreak', icon: '🌍', label: `Countries (${hs8CountryBreak.length})` },
+          { key: 'monthtrends', icon: '📈', label: `Trends (${hs8MonthTrends.length})` },
+          { key: 'pricedist', icon: '💰', label: `Pricing (${hs8PriceDist.length})` },
+        ];
+        const fmt = (n, d = 0) => n != null ? Number(n).toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d }) : '—';
+        const fmtUsd = n => n != null ? '$' + fmt(n, 0) : '—';
+        const fmtPct = n => n != null ? fmt(n, 1) + '%' : '—';
+        const verdictColor = v => v === 'PURSUE' ? COLORS.pass : v === 'STRONG' ? COLORS.blue : v === 'MODERATE' ? COLORS.maybe : COLORS.drop;
+
+        return (
+          <div>
+            {/* Header + HS4 filter + sub-nav */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
+              <h2 style={{ fontSize: '20px', color: '#e2e8f0', margin: 0 }}>🎯 Command Center — HS8-Level Research Intelligence</h2>
+              <select value={cmdHS4Filter} onChange={e => setCmdHS4Filter(e.target.value)} style={{ padding: '8px 12px', background: '#1a2035', color: '#e2e8f0', border: '1px solid rgba(148,163,184,0.15)', borderRadius: '8px', fontSize: '13px' }}>
+                <option value="">All HS4 Codes ({cmdHS4Options.length})</option>
+                {cmdHS4Options.map(h => <option key={h} value={h}>{h}</option>)}
+              </select>
+            </div>
+            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '20px' }}>
+              {CMD_VIEWS.map(v => (
+                <button key={v.key} onClick={() => setCmdCenterView(v.key)} style={{ padding: '7px 14px', borderRadius: '8px', border: cmdCenterView === v.key ? '1px solid rgba(96,165,250,0.4)' : '1px solid rgba(148,163,184,0.1)', background: cmdCenterView === v.key ? 'rgba(96,165,250,0.15)' : 'rgba(15,23,42,0.6)', color: cmdCenterView === v.key ? '#60a5fa' : '#94a3b8', fontSize: '13px', cursor: 'pointer', fontWeight: cmdCenterView === v.key ? 600 : 400 }}>{v.icon} {v.label}</button>
+              ))}
+            </div>
+
+            {/* KPI row */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '12px', marginBottom: '20px' }}>
+              <KPI label="HS8 Products" value={cmdHs8SF.sorted.length} variant="blue" />
+              <KPI label="Unique Buyers" value={cmdBuyerSF.sorted.length} variant="pass" />
+              <KPI label="Countries" value={[...new Set(cmdCountryData.map(c => c.country))].length} variant="cyan" />
+              <KPI label="Total CIF" value={fmtUsd(cmdHs8SF.sorted.reduce((a, h) => a + (h.total_cif_usd || 0), 0))} variant="blue" />
+              <KPI label="PURSUE" value={cmdHs8SF.sorted.filter(h => h.verdict === 'PURSUE').length} variant="pass" />
+              <KPI label="STRONG" value={cmdHs8SF.sorted.filter(h => h.verdict === 'STRONG').length} variant="blue" />
+            </div>
+
+            {/* ===== SUB-VIEW: HS8 Product Analysis ===== */}
+            {cmdCenterView === 'hs8analysis' && (
+              <Card title={`HS8 Product Analysis${cmdHS4Filter ? ` — HS4 ${cmdHS4Filter}` : ''}`} emoji="🔬">
+                <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '12px' }}>249 HS8 sub-products scored on 12 dimensions (150 pts). Click column headers to sort.</div>
+                <div style={{ overflowX: 'auto', maxHeight: '600px', overflowY: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', minWidth: '1200px' }}>
+                    <thead><tr>
+                      <SortHeader label="HS8" field="hs8_code" {...cmdHs8SF} />
+                      <th style={thStyle}>HS4</th>
+                      <th style={{ ...thStyle, maxWidth: '200px' }}>Product</th>
+                      <SortHeader label="Score" field="total_score" {...cmdHs8SF} />
+                      <th style={thStyle}>Verdict</th>
+                      <th style={thStyle}>Model</th>
+                      <SortHeader label="CIF $" field="total_cif_usd" {...cmdHs8SF} />
+                      <SortHeader label="Shipments" field="total_shipments" {...cmdHs8SF} />
+                      <SortHeader label="Buyers" field="unique_buyers" {...cmdHs8SF} />
+                      <SortHeader label="Margin %" field="gross_margin_est_pct" {...cmdHs8SF} />
+                      <SortHeader label="China %" field="china_pct" {...cmdHs8SF} />
+                      <SortHeader label="HHI" field="buyer_hhi" {...cmdHs8SF} />
+                      <th style={thStyle}>Reg Risk</th>
+                      <SortHeader label="Avg Rate $" field="volza_avg_unit_rate" {...cmdHs8SF} />
+                    </tr></thead>
+                    <tbody>{cmdHs8SF.sorted.slice(0, 100).map(h => (
+                      <tr key={h.hs8_code} onMouseEnter={e => e.currentTarget.style.background = 'rgba(96,165,250,0.04)'} onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                        <td style={{ ...tdStyle, fontWeight: 700, color: COLORS.cyan, fontFamily: 'monospace' }}>{h.hs8_code}</td>
+                        <td style={{ ...tdStyle, color: COLORS.blue }}>{h.hs4}</td>
+                        <td style={{ ...tdStyle, maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={h.product_desc}>{h.product_desc || '—'}</td>
+                        <td style={{ ...tdStyle, fontWeight: 700, color: verdictColor(h.verdict) }}>{h.total_score || '—'}</td>
+                        <td style={tdStyle}><Badge label={h.verdict || 'N/A'} /></td>
+                        <td style={{ ...tdStyle, fontSize: '11px', color: MODEL_COLORS[h.trading_model] || '#94a3b8' }}>{h.trading_model || '—'}</td>
+                        <td style={{ ...tdStyle, fontWeight: 600 }}>{fmtUsd(h.total_cif_usd)}</td>
+                        <td style={tdStyle}>{fmt(h.total_shipments)}</td>
+                        <td style={tdStyle}>{fmt(h.unique_buyers)}</td>
+                        <td style={{ ...tdStyle, color: (h.gross_margin_est_pct || 0) > 20 ? COLORS.pass : (h.gross_margin_est_pct || 0) > 10 ? COLORS.maybe : COLORS.drop }}>{fmtPct(h.gross_margin_est_pct)}</td>
+                        <td style={tdStyle}>{fmtPct(h.china_pct)}</td>
+                        <td style={{ ...tdStyle, color: (h.buyer_hhi || 0) > 2500 ? COLORS.drop : COLORS.pass }}>{fmt(h.buyer_hhi)}</td>
+                        <td style={tdStyle}><Badge label={h.regulatory_risk || 'N/A'} /></td>
+                        <td style={tdStyle}>{fmtUsd(h.volza_avg_unit_rate)}</td>
+                      </tr>
+                    ))}</tbody>
+                  </table>
+                </div>
+                {cmdHs8SF.sorted.length > 100 && <div style={{ textAlign: 'center', padding: '12px', color: '#64748b', fontSize: '12px' }}>Showing top 100 of {cmdHs8SF.sorted.length} products</div>}
+              </Card>
+            )}
+
+            {/* ===== SUB-VIEW: Buyer Matrix ===== */}
+            {cmdCenterView === 'buyermatrix' && (
+              <Card title={`Buyer Matrix${cmdHS4Filter ? ` — HS4 ${cmdHS4Filter}` : ''}`} emoji="👥">
+                <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '12px' }}>{cmdBuyerSF.sorted.length} buyers across all HS8 products. Sorted by CIF value.</div>
+                <div style={{ overflowX: 'auto', maxHeight: '600px', overflowY: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', minWidth: '1100px' }}>
+                    <thead><tr>
+                      <SortHeader label="Company" field="company_name" {...cmdBuyerSF} />
+                      <th style={thStyle}>HS8</th>
+                      <th style={thStyle}>HS4</th>
+                      <SortHeader label="CIF $" field="total_cif_usd" {...cmdBuyerSF} />
+                      <SortHeader label="Shipments" field="shipment_count" {...cmdBuyerSF} />
+                      <SortHeader label="Avg Rate $" field="avg_unit_rate" {...cmdBuyerSF} />
+                      <SortHeader label="Suppliers" field="supplier_count" {...cmdBuyerSF} />
+                      <th style={thStyle}>City</th>
+                      <th style={thStyle}>State</th>
+                      <SortHeader label="China %" field="china_pct" {...cmdBuyerSF} />
+                      <th style={thStyle}>Single Src</th>
+                      <th style={thStyle}>Type</th>
+                      <th style={thStyle}>Priority</th>
+                    </tr></thead>
+                    <tbody>{cmdBuyerSF.sorted.slice(0, 100).map((b, i) => (
+                      <tr key={b.id || i} onMouseEnter={e => e.currentTarget.style.background = 'rgba(96,165,250,0.04)'} onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                        <td style={{ ...tdStyle, fontWeight: 600, color: '#e2e8f0', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={b.company_name}>{b.company_name}</td>
+                        <td style={{ ...tdStyle, fontFamily: 'monospace', color: COLORS.cyan, fontSize: '11px' }}>{b.hs8_code}</td>
+                        <td style={{ ...tdStyle, color: COLORS.blue }}>{b.hs4}</td>
+                        <td style={{ ...tdStyle, fontWeight: 600 }}>{fmtUsd(b.total_cif_usd)}</td>
+                        <td style={tdStyle}>{fmt(b.shipment_count)}</td>
+                        <td style={tdStyle}>{fmtUsd(b.avg_unit_rate)}</td>
+                        <td style={tdStyle}>{fmt(b.supplier_count)}</td>
+                        <td style={{ ...tdStyle, fontSize: '11px' }}>{b.city || '—'}</td>
+                        <td style={{ ...tdStyle, fontSize: '11px' }}>{b.state || '—'}</td>
+                        <td style={tdStyle}>{fmtPct(b.china_pct)}</td>
+                        <td style={tdStyle}>{b.is_single_source ? <span style={{ color: COLORS.drop }}>Yes</span> : <span style={{ color: COLORS.pass }}>No</span>}</td>
+                        <td style={{ ...tdStyle, fontSize: '11px' }}>{b.buyer_type_est || '—'}</td>
+                        <td style={tdStyle}>{b.target_priority ? <Badge label={b.target_priority} /> : '—'}</td>
+                      </tr>
+                    ))}</tbody>
+                  </table>
+                </div>
+                {cmdBuyerSF.sorted.length > 100 && <div style={{ textAlign: 'center', padding: '12px', color: '#64748b', fontSize: '12px' }}>Showing top 100 of {cmdBuyerSF.sorted.length} buyers</div>}
+              </Card>
+            )}
+
+            {/* ===== SUB-VIEW: Country Breakdown ===== */}
+            {cmdCenterView === 'countrybreak' && (
+              <Card title={`Country Breakdown${cmdHS4Filter ? ` — HS4 ${cmdHS4Filter}` : ''}`} emoji="🌍">
+                <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '12px' }}>{cmdCountrySF.sorted.length} country-product combinations. Shows sourcing geography per HS8.</div>
+                <div style={{ overflowX: 'auto', maxHeight: '600px', overflowY: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                    <thead><tr>
+                      <SortHeader label="Country" field="country" {...cmdCountrySF} />
+                      <th style={thStyle}>HS8</th>
+                      <th style={thStyle}>HS4</th>
+                      <SortHeader label="CIF $" field="total_cif_usd" {...cmdCountrySF} />
+                      <SortHeader label="Shipments" field="shipment_count" {...cmdCountrySF} />
+                      <SortHeader label="Buyers" field="unique_buyers" {...cmdCountrySF} />
+                      <SortHeader label="Shippers" field="unique_shippers" {...cmdCountrySF} />
+                      <SortHeader label="Avg Rate $" field="avg_unit_rate" {...cmdCountrySF} />
+                      <SortHeader label="Share %" field="share_pct" {...cmdCountrySF} />
+                    </tr></thead>
+                    <tbody>{cmdCountrySF.sorted.slice(0, 100).map((c, i) => (
+                      <tr key={c.id || i} onMouseEnter={e => e.currentTarget.style.background = 'rgba(96,165,250,0.04)'} onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                        <td style={{ ...tdStyle, fontWeight: 600, color: (c.country || '').includes('CHINA') ? COLORS.drop : '#e2e8f0' }}>{c.country || '—'}</td>
+                        <td style={{ ...tdStyle, fontFamily: 'monospace', color: COLORS.cyan, fontSize: '11px' }}>{c.hs8_code}</td>
+                        <td style={{ ...tdStyle, color: COLORS.blue }}>{c.hs4}</td>
+                        <td style={{ ...tdStyle, fontWeight: 600 }}>{fmtUsd(c.total_cif_usd)}</td>
+                        <td style={tdStyle}>{fmt(c.shipment_count)}</td>
+                        <td style={tdStyle}>{fmt(c.unique_buyers)}</td>
+                        <td style={tdStyle}>{fmt(c.unique_shippers)}</td>
+                        <td style={tdStyle}>{fmtUsd(c.avg_unit_rate)}</td>
+                        <td style={{ ...tdStyle, fontWeight: 600, color: COLORS.blue }}>{fmtPct(c.share_pct)}</td>
+                      </tr>
+                    ))}</tbody>
+                  </table>
+                </div>
+                {cmdCountrySF.sorted.length > 100 && <div style={{ textAlign: 'center', padding: '12px', color: '#64748b', fontSize: '12px' }}>Showing top 100 of {cmdCountrySF.sorted.length} entries</div>}
+              </Card>
+            )}
+
+            {/* ===== SUB-VIEW: Monthly Trends ===== */}
+            {cmdCenterView === 'monthtrends' && (
+              <Card title={`Monthly Trends${cmdHS4Filter ? ` — HS4 ${cmdHS4Filter}` : ''}`} emoji="📈">
+                <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '12px' }}>{cmdTrendSF.sorted.length} monthly data points across HS8 products.</div>
+                <div style={{ overflowX: 'auto', maxHeight: '600px', overflowY: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                    <thead><tr>
+                      <SortHeader label="Month" field="month" {...cmdTrendSF} />
+                      <th style={thStyle}>HS8</th>
+                      <th style={thStyle}>HS4</th>
+                      <SortHeader label="CIF $" field="total_cif_usd" {...cmdTrendSF} />
+                      <SortHeader label="Shipments" field="shipment_count" {...cmdTrendSF} />
+                      <SortHeader label="Buyers" field="unique_buyers" {...cmdTrendSF} />
+                      <SortHeader label="Shippers" field="unique_shippers" {...cmdTrendSF} />
+                      <SortHeader label="Avg Rate $" field="avg_unit_rate" {...cmdTrendSF} />
+                      <SortHeader label="Med Rate $" field="median_unit_rate" {...cmdTrendSF} />
+                      <SortHeader label="China %" field="china_pct" {...cmdTrendSF} />
+                    </tr></thead>
+                    <tbody>{cmdTrendSF.sorted.slice(0, 100).map((t, i) => (
+                      <tr key={t.id || i} onMouseEnter={e => e.currentTarget.style.background = 'rgba(96,165,250,0.04)'} onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                        <td style={{ ...tdStyle, fontWeight: 600, color: COLORS.blue }}>{t.month || '—'}</td>
+                        <td style={{ ...tdStyle, fontFamily: 'monospace', color: COLORS.cyan, fontSize: '11px' }}>{t.hs8_code}</td>
+                        <td style={{ ...tdStyle, color: COLORS.blue }}>{t.hs4}</td>
+                        <td style={{ ...tdStyle, fontWeight: 600 }}>{fmtUsd(t.total_cif_usd)}</td>
+                        <td style={tdStyle}>{fmt(t.shipment_count)}</td>
+                        <td style={tdStyle}>{fmt(t.unique_buyers)}</td>
+                        <td style={tdStyle}>{fmt(t.unique_shippers)}</td>
+                        <td style={tdStyle}>{fmtUsd(t.avg_unit_rate)}</td>
+                        <td style={tdStyle}>{fmtUsd(t.median_unit_rate)}</td>
+                        <td style={tdStyle}>{fmtPct(t.china_pct)}</td>
+                      </tr>
+                    ))}</tbody>
+                  </table>
+                </div>
+                {cmdTrendSF.sorted.length > 100 && <div style={{ textAlign: 'center', padding: '12px', color: '#64748b', fontSize: '12px' }}>Showing top 100 of {cmdTrendSF.sorted.length} entries</div>}
+              </Card>
+            )}
+
+            {/* ===== SUB-VIEW: Price Distribution ===== */}
+            {cmdCenterView === 'pricedist' && (
+              <Card title={`Price Distribution${cmdHS4Filter ? ` — HS4 ${cmdHS4Filter}` : ''}`} emoji="💰">
+                <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '12px' }}>{cmdPriceSF.sorted.length} price brackets across HS8 products. Shows CIF value and order size distribution.</div>
+                <div style={{ overflowX: 'auto', maxHeight: '600px', overflowY: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                    <thead><tr>
+                      <th style={thStyle}>HS8</th>
+                      <th style={thStyle}>HS4</th>
+                      <th style={thStyle}>Bracket Type</th>
+                      <th style={thStyle}>Bracket</th>
+                      <SortHeader label="CIF $" field="total_cif_usd" {...cmdPriceSF} />
+                      <SortHeader label="Shipments" field="shipment_count" {...cmdPriceSF} />
+                      <SortHeader label="Buyers" field="buyer_count" {...cmdPriceSF} />
+                      <th style={thStyle}>Min $</th>
+                      <th style={thStyle}>Max $</th>
+                    </tr></thead>
+                    <tbody>{cmdPriceSF.sorted.slice(0, 100).map((p, i) => (
+                      <tr key={p.id || i} onMouseEnter={e => e.currentTarget.style.background = 'rgba(96,165,250,0.04)'} onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                        <td style={{ ...tdStyle, fontFamily: 'monospace', color: COLORS.cyan, fontSize: '11px' }}>{p.hs8_code}</td>
+                        <td style={{ ...tdStyle, color: COLORS.blue }}>{p.hs4}</td>
+                        <td style={{ ...tdStyle, fontSize: '11px' }}>{p.bracket_type || '—'}</td>
+                        <td style={{ ...tdStyle, fontWeight: 600 }}>{p.bracket_label || '—'}</td>
+                        <td style={{ ...tdStyle, fontWeight: 600 }}>{fmtUsd(p.total_cif_usd)}</td>
+                        <td style={tdStyle}>{fmt(p.shipment_count)}</td>
+                        <td style={tdStyle}>{fmt(p.buyer_count)}</td>
+                        <td style={{ ...tdStyle, fontSize: '11px' }}>{fmtUsd(p.bracket_min)}</td>
+                        <td style={{ ...tdStyle, fontSize: '11px' }}>{fmtUsd(p.bracket_max)}</td>
+                      </tr>
+                    ))}</tbody>
+                  </table>
+                </div>
+                {cmdPriceSF.sorted.length > 100 && <div style={{ textAlign: 'center', padding: '12px', color: '#64748b', fontSize: '12px' }}>Showing top 100 of {cmdPriceSF.sorted.length} entries</div>}
+              </Card>
             )}
           </div>
         );
