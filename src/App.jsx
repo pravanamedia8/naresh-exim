@@ -15,25 +15,51 @@ import BusinessIntel from './tabs/BusinessIntel';
 import ElectronicsResearch from './tabs/ElectronicsResearch';
 import ProductShortlist from './tabs/ProductShortlist';
 import HS8DeepDive from './tabs/HS8DeepDive';
+import DealPipeline from './tabs/DealPipeline';
+import FinancialProjections from './tabs/FinancialProjections';
+import ComplianceTracker from './tabs/ComplianceTracker';
+import SupplierNegotiations from './tabs/SupplierNegotiations';
+import SupplyChainPlan from './tabs/SupplyChainPlan';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('overview');
 
   const tabGroups = [
     {
-      label: 'Strategy',
+      label: 'Executive',
       tabs: [
         { id: 'overview', label: '📊 Overview', subtitle: 'Executive dashboard' },
+        { id: 'deals', label: '🤝 Deal Pipeline', subtitle: 'Active deals & stages' },
+        { id: 'finance', label: '💹 Financials', subtitle: '3-scenario projections' },
+        { id: 'compliance', label: '📋 Compliance', subtitle: 'Cert tracking' },
+        { id: 'negotiations', label: '🏭 Suppliers', subtitle: 'Negotiation tracker' },
+        { id: 'supplychain', label: '🔗 Supply Chain', subtitle: 'Go-to-market plan' },
+      ],
+    },
+    {
+      label: 'Operations',
+      tabs: [
         { id: 'pipeline', label: '🚀 Pipeline', subtitle: 'Sales funnel journey' },
+        { id: 'shipments', label: '🚢 Shipments', subtitle: '7,784 records' },
+        { id: 'buyers', label: '🎯 Buyers & Targets', subtitle: '950 buyers + 12 targets' },
+        { id: 'importers', label: '🏭 Importers', subtitle: '54 classified' },
+      ],
+    },
+    {
+      label: 'Research',
+      tabs: [
+        { id: 'electronics', label: '🔬 Electronics', subtitle: '180 codes pipeline' },
+        { id: 'shortlist', label: '🏆 Shortlist', subtitle: '35 scored products' },
+        { id: 'hs8deep', label: '🔎 HS8 Deep Dive', subtitle: '249 products, 3.6K buyers' },
       ],
     },
     {
       label: 'Product Hierarchy',
       tabs: [
-        { id: 'hs2', label: '📦 HS2 Chapters', subtitle: '97 chapters' },
-        { id: 'hs4', label: '🏷️ HS4 Products', subtitle: '1,123 products' },
-        { id: 'hs6', label: '🔍 HS6 Sub-Heads', subtitle: '4,632 sub-headings' },
-        { id: 'hs8', label: '📋 HS8 Raw', subtitle: '9,300 line items' },
+        { id: 'hs2', label: '📦 HS2', subtitle: '97 chapters' },
+        { id: 'hs4', label: '🏷️ HS4', subtitle: '1,123 products' },
+        { id: 'hs6', label: '🔍 HS6', subtitle: '4,632 sub-headings' },
+        { id: 'hs8', label: '📋 HS8', subtitle: '9,300 line items' },
       ],
     },
     {
@@ -42,27 +68,6 @@ export default function App() {
         { id: 'categories', label: '📁 Categories', subtitle: '17 categories' },
         { id: 'margins', label: '💰 Margins', subtitle: '4 products' },
         { id: 'business', label: '🧠 Business Intel', subtitle: 'Projections & forecasts' },
-      ],
-    },
-    {
-      label: 'Market Intel',
-      tabs: [
-        { id: 'shipments', label: '🚢 Shipments', subtitle: '7,784 records' },
-        { id: 'buyers', label: '🎯 Buyers & Targets', subtitle: '950 buyers + 12 targets' },
-        { id: 'importers', label: '🏭 Importers', subtitle: '54 classified' },
-      ],
-    },
-    {
-      label: 'Electronics Research',
-      tabs: [
-        { id: 'electronics', label: '🔬 Electronics Research', subtitle: '180 codes pipeline' },
-        { id: 'shortlist', label: '🏆 Product Shortlist', subtitle: '35 scored + 6 deep dives' },
-        { id: 'hs8deep', label: '🔎 HS8 Deep Dive', subtitle: '249 products, 3.6K buyers' },
-      ],
-    },
-    {
-      label: 'Reference',
-      tabs: [
         { id: 'scoring', label: '⚡ Scoring', subtitle: 'Methodology reference' },
       ],
     },
@@ -72,6 +77,16 @@ export default function App() {
     switch (activeTab) {
       case 'overview':
         return <Overview />;
+      case 'deals':
+        return <DealPipeline />;
+      case 'finance':
+        return <FinancialProjections />;
+      case 'compliance':
+        return <ComplianceTracker />;
+      case 'negotiations':
+        return <SupplierNegotiations />;
+      case 'supplychain':
+        return <SupplyChainPlan />;
       case 'pipeline':
         return <PipelineJourney />;
       case 'hs2':
@@ -111,8 +126,8 @@ export default function App() {
     <div className="app">
       <header className="hdr">
         <div>
-          <div className="hdr-title">🏢 KALASH EXIM Pipeline Dashboard</div>
-          <div className="hdr-subtitle">📡 LIVE from SQLite DB | 9,300 HS8 → 1,123 HS4 → 97 HS2 Chapters</div>
+          <div className="hdr-title">🏢 KALASH EXIM Command Center</div>
+          <div className="hdr-subtitle">📡 LIVE from Supabase + SQLite | Electronics Research Pipeline + Import Operations</div>
         </div>
         <div className="hdr-right">
           <div className="hdr-subtitle">{new Date().toLocaleDateString()}</div>
@@ -145,7 +160,7 @@ export default function App() {
       </div>
 
       <footer className="footer">
-        ⚡ KALASH EXIM Dashboard © 2026 | Powered by React + Recharts + SQLite
+        ⚡ KALASH EXIM Command Center © 2026 | Powered by React + Supabase + Recharts
       </footer>
     </div>
   );
