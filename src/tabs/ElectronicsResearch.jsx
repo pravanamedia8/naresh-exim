@@ -133,7 +133,7 @@ export default function ElectronicsResearch() {
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [volzaHS4Filter, setVolzaHS4Filter] = useState('');
-  const [volzaView, setVolzaView] = useState('overview');
+  const [volzaView, setVolzaView] = useState('dashboard');
   const [selectedVolzaHS4, setSelectedVolzaHS4] = useState(null);
   const [analyticsFilters, setAnalyticsFilters] = useState({ marginTier: '', marketSize: '', regRisk: '', tradingModel: '', bisReq: '', certCount: '' });
   const [volzaQueue, setVolzaQueue] = useState([]);
