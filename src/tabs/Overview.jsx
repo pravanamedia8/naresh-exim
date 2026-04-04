@@ -1,321 +1,107 @@
-import React, { useEffect, useState } from 'react';
-import {
-  PieChart, Pie, Cell,
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
-} from 'recharts';
+import { useState, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
+import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 
-const Overview = () => {
+const COLORS = { EXCELLENT: '#34d399', GOOD: '#60a5fa', MODERATE: '#fbbf24', THIN: '#f59e0b', NEGATIVE: '#f87171', PURSUE: '#34d399', STRONG: '#60a5fa', REGULAR: '#34d399', SPOT: '#fbbf24', MIXED: '#a78bfa', BROKER: '#60a5fa' };
+
+export default function Overview() {
+  const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [overviewData, setOverviewData] = useState(null);
-  const [categoryData, setCategoryData] = useState(null);
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        setLoading(true);
-        setError(null);
+  useEffect(() => { fetchAll(); }, []);
 
-        // Fetch counts from all tables
-        const [hs8, hs4, hs2, shortlist, ps, volza_ships, volza_buyers, targets, margins, importers] = await Promise.all([
-          supabase.from('hs8_raw').select('*', { count: 'exact' }).limit(1),
-          supabase.from('hs4_scored').select('*', { count: 'exact' }).limit(1),
-          supabase.from('hs2_scored').select('*', { count: 'exact' }).limit(1),
-          supabase.from('shortlist').select('*', { count: 'exact' }).limit(1),
-          supabase.from('pipeline_stages').select('*'),
-          supabase.from('volza_shipments').select('*', { count: 'exact' }).limit(1),
-          supabase.from('volza_buyers').select('*', { count: 'exact' }).limit(1),
-          supabase.from('target_buyers').select('*', { count: 'exact' }).limit(1),
-          supabase.from('margin_analysis').select('*', { count: 'exact' }).limit(1),
-          supabase.from('importers_classified').select('*', { count: 'exact' }).limit(1)
-        ]);
-
-        // Calculate verdict breakdown from hs4_scored
-        const hs4Data = await supabase.from('hs4_scored').select('verdict');
-        const verdictBreakdown = { PASS: 0, MAYBE: 0, WATCH: 0, DROP: 0 };
-        hs4Data.data?.forEach(row => {
-          if (row.verdict && verdictBreakdown.hasOwnProperty(row.verdict)) {
-            verdictBreakdown[row.verdict]++;
-          }
-        });
-
-        // Get categories data from hs4_scored
-        const allHs4 = await supabase.from('hs4_scored').select('category, verdict, drill_score');
-        const categoryMap = {};
-        allHs4.data?.forEach(row => {
-          if (!categoryMap[row.category]) {
-            categoryMap[row.category] = { category: row.category, count: 0, pass_count: 0, maybe_count: 0, watch_count: 0, drop_count: 0, avg_score: 0, total_score: 0 };
-          }
-          categoryMap[row.category].count++;
-          categoryMap[row.category].total_score += row.drill_score || 0;
-          if (row.verdict === 'PASS') categoryMap[row.category].pass_count++;
-          else if (row.verdict === 'MAYBE') categoryMap[row.category].maybe_count++;
-          else if (row.verdict === 'WATCH') categoryMap[row.category].watch_count++;
-          else if (row.verdict === 'DROP') categoryMap[row.category].drop_count++;
-        });
-        Object.values(categoryMap).forEach(c => { c.avg_score = c.total_score / c.count; });
-
-        const overview = {
-          counts: {
-            hs8_raw: hs8.count || 0,
-            hs4_scored: hs4.count || 0,
-            hs2_scored: hs2.count || 0,
-            shortlist: shortlist.count || 0,
-            volza_shipments: volza_ships.count || 0,
-            volza_buyers: volza_buyers.count || 0,
-            target_buyers: targets.count || 0,
-            margin_analysis: margins.count || 0,
-            importers_classified: importers.count || 0,
-            verdict_breakdown: verdictBreakdown
-          },
-          pipeline_stages: (ps.data || []).sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))
-        };
-
-        setOverviewData(overview);
-        setCategoryData({ categories: Object.values(categoryMap) });
-      } catch (err) {
-        console.error('Error loading overview data:', err);
-        setError('Data will appear here as research progresses');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchData();
-  }, []);
-
-  if (loading) {
-    return (
-      <div className="overview-container">
-        <div className="loading">⏳ Loading Overview...</div>
-      </div>
-    );
+  async function fetchAll() {
+    try {
+      const [rc, p5, hm, tb, vq, sl] = await Promise.all([
+        supabase.from('research_codes').select('current_phase, trading_model'),
+        supabase.from('phase5_scoring').select('verdict'),
+        supabase.from('hs8_margin_analysis').select('margin_verdict'),
+        supabase.from('task_board').select('status'),
+        supabase.from('volza_scrape_queue').select('scrape_status'),
+        supabase.from('strategy_log').select('*').order('timestamp', { ascending: false }).limit(5),
+      ]);
+      const phases = {}; (rc.data||[]).forEach(r => { phases[r.current_phase] = (phases[r.current_phase]||0)+1; });
+      const models = {}; (rc.data||[]).forEach(r => { if(r.trading_model) models[r.trading_model] = (models[r.trading_model]||0)+1; });
+      const verdicts = {}; (p5.data||[]).forEach(r => { verdicts[r.verdict] = (verdicts[r.verdict]||0)+1; });
+      const margins = {}; (hm.data||[]).forEach(r => { margins[r.margin_verdict] = (margins[r.margin_verdict]||0)+1; });
+      const taskPending = (tb.data||[]).filter(r => r.status==='pending').length;
+      const taskDone = (tb.data||[]).filter(r => r.status==='completed').length;
+      const scrapeComp = (vq.data||[]).filter(r => r.scrape_status==='completed').length;
+      const scrapeTotal = (vq.data||[]).length;
+      setData({ phases, models, verdicts, margins, taskPending, taskDone, scrapeComp, scrapeTotal, strategy: sl.data||[], totalCodes: (rc.data||[]).length, marginTotal: (hm.data||[]).length });
+    } catch(e) { console.error(e); }
+    setLoading(false);
   }
 
-  if (error) {
-    return (
-      <div className="overview-container">
-        <div style={{ color: 'var(--error)', padding: '20px', textAlign: 'center' }}>{error}</div>
-      </div>
-    );
-  }
+  if (loading) return <div style={{padding:40,color:'#94a3b8'}}>Loading dashboard...</div>;
+  if (!data) return <div style={{padding:40,color:'#f87171'}}>Error loading data</div>;
 
-  if (!overviewData) {
-    return (
-      <div className="overview-container">
-        <div style={{ color: 'var(--tx2)', padding: '20px', textAlign: 'center' }}>No data available</div>
-      </div>
-    );
-  }
+  const phaseData = Object.entries(data.phases).map(([name,value]) => ({name: name.replace(/_/g,' '), value}));
+  const marginData = ['EXCELLENT','GOOD','MODERATE','THIN','NEGATIVE'].map(v => ({name:v, count: data.margins[v]||0}));
+  const modelData = Object.entries(data.models).map(([name,value]) => ({name,value}));
 
-  const { counts = {}, pipeline_stages = [] } = overviewData;
-  const verdictData = [
-    { name: 'PASS', value: counts.verdict_breakdown?.PASS || 0, color: '#34d399' },
-    { name: 'MAYBE', value: counts.verdict_breakdown?.MAYBE || 0, color: '#fbbf24' },
-    { name: 'WATCH', value: counts.verdict_breakdown?.WATCH || 0, color: '#a78bfa' },
-    { name: 'DROP', value: counts.verdict_breakdown?.DROP || 0, color: '#f87171' }
+  const kpis = [
+    {label:'Research Codes', value:data.totalCodes, color:'#60a5fa'},
+    {label:'Phase 5 Scored', value:(data.verdicts.PURSUE||0)+(data.verdicts.STRONG||0), sub:`${data.verdicts.PURSUE||0} PURSUE + ${data.verdicts.STRONG||0} STRONG`, color:'#34d399'},
+    {label:'HS8 Winners', value:(data.margins.EXCELLENT||0)+(data.margins.GOOD||0), sub:`of ${data.marginTotal} analyzed`, color:'#fbbf24'},
+    {label:'Tasks Pending', value:data.taskPending, sub:`${data.taskDone} completed`, color:'#f59e0b'},
+    {label:'Volza Scraped', value:`${data.scrapeComp}/${data.scrapeTotal}`, color:'#a78bfa'},
+    {label:'Trading Models', value:Object.values(data.models).reduce((a,b)=>a+b,0), sub:Object.entries(data.models).map(([k,v])=>`${v} ${k}`).join(', '), color:'#34d399'},
   ];
 
-  // Prepare top 10 categories by avg_score
-  const topCategories = categoryData?.categories
-    ? [...categoryData.categories]
-        .sort((a, b) => (b.avg_score || 0) - (a.avg_score || 0))
-        .slice(0, 10)
-        .reverse()
-    : [];
-
-  // Prepare category verdict distribution data
-  const categoryVerdictData = categoryData?.categories
-    ? categoryData.categories.map(cat => ({
-        category: cat.category,
-        PASS: cat.pass_count || 0,
-        MAYBE: cat.maybe_count || 0,
-        WATCH: cat.watch_count || 0,
-        DROP: cat.drop_count || 0
-      }))
-    : [];
+  const card = {background:'rgba(17,24,39,0.8)', border:'1px solid rgba(148,163,184,0.1)', borderRadius:12, padding:20};
 
   return (
-    <div>
-      {/* TOP ROW: KPI CARDS */}
-      <div className="kpis">
-        <div className="kpi hl">
-          <div className="kpi-lbl">📋 HS8 Raw Products</div>
-          <div className="kpi-val" style={{ color: '#60a5fa' }}>{(counts.hs8_raw || 0).toLocaleString()}</div>
-          <div className="kpi-sub">Total raw products</div>
-        </div>
-        <div className="kpi hl">
-          <div className="kpi-lbl">🏷️ HS4 Scored Products</div>
-          <div className="kpi-val" style={{ color: '#60a5fa' }}>{(counts.hs4_scored || 0).toLocaleString()}</div>
-          <div className="kpi-sub">Scored in system</div>
-        </div>
-        <div className="kpi hl">
-          <div className="kpi-lbl">📦 HS2 Chapters</div>
-          <div className="kpi-val" style={{ color: '#60a5fa' }}>{(counts.hs2_scored || 0).toLocaleString()}</div>
-          <div className="kpi-sub">Product categories</div>
-        </div>
-        <div className="kpi gn">
-          <div className="kpi-lbl">⭐ Shortlisted</div>
-          <div className="kpi-val" style={{ color: '#34d399' }}>{(counts.shortlist || 0).toLocaleString()}</div>
-          <div className="kpi-sub">Selected products</div>
-        </div>
-        <div className="kpi gn">
-          <div className="kpi-lbl">✅ PASS / High Confidence</div>
-          <div className="kpi-val" style={{ color: '#34d399' }}>{(counts.verdict_breakdown?.PASS || 0).toLocaleString()}</div>
-          <div className="kpi-sub">High confidence</div>
-        </div>
-        <div className="kpi yw">
-          <div className="kpi-lbl">⚠️ MAYBE / Moderate</div>
-          <div className="kpi-val" style={{ color: '#fbbf24' }}>{(counts.verdict_breakdown?.MAYBE || 0).toLocaleString()}</div>
-          <div className="kpi-sub">Needs review</div>
-        </div>
-        <div className="kpi pp">
-          <div className="kpi-lbl">👀 WATCH / Low Priority</div>
-          <div className="kpi-val" style={{ color: '#a78bfa' }}>{(counts.verdict_breakdown?.WATCH || 0).toLocaleString()}</div>
-          <div className="kpi-sub">Monitor status</div>
-        </div>
-        <div className="kpi rd">
-          <div className="kpi-lbl">❌ DROP / Below Threshold</div>
-          <div className="kpi-val" style={{ color: '#f87171' }}>{(counts.verdict_breakdown?.DROP || 0).toLocaleString()}</div>
-          <div className="kpi-sub">Below threshold</div>
-        </div>
+    <div style={{padding:24}}>
+      <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(180px, 1fr))', gap:16, marginBottom:24}}>
+        {kpis.map(k => (
+          <div key={k.label} style={{...card, borderTop:`3px solid ${k.color}`}}>
+            <div style={{color:'#94a3b8', fontSize:12, textTransform:'uppercase', letterSpacing:1}}>{k.label}</div>
+            <div style={{color:k.color, fontSize:28, fontWeight:700, marginTop:4}}>{k.value}</div>
+            {k.sub && <div style={{color:'#64748b', fontSize:11, marginTop:4}}>{k.sub}</div>}
+          </div>
+        ))}
       </div>
-
-      {/* SECOND ROW: VERDICT PIE + PIPELINE STAGES */}
-      <div className="g2">
-        <div className="card">
-          <h3 className="card-title">🎯 Verdict Distribution</h3>
-          <div className="chart-container">
-            <ResponsiveContainer width="100%" height={300}>
-              <PieChart>
-                <Pie
-                  data={verdictData}
-                  cx="50%"
-                  cy="50%"
-                  labelLine={false}
-                  label={({ name, value }) => `${name}: ${value}`}
-                  outerRadius={100}
-                  fill="#8884d8"
-                  dataKey="value"
-                >
-                  {verdictData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} />
-                  ))}
-                </Pie>
-                <Tooltip contentStyle={{ backgroundColor: 'var(--bg3)', border: '1px solid var(--border)' }} />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
+      <div style={{display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:16, marginBottom:24}}>
+        <div style={card}>
+          <h3 style={{color:'#e2e8f0', fontSize:14, marginBottom:12}}>Research Phases</h3>
+          <ResponsiveContainer width="100%" height={220}>
+            <PieChart><Pie data={phaseData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label={({value})=>`${value}`}>
+              {phaseData.map((_,i) => <Cell key={i} fill={['#34d399','#60a5fa','#fbbf24','#a78bfa','#f87171','#06b6d4'][i%6]} />)}
+            </Pie><Tooltip contentStyle={{background:'#1e293b',border:'none',color:'#e2e8f0'}} /><Legend wrapperStyle={{fontSize:11}} /></PieChart>
+          </ResponsiveContainer>
         </div>
-
-        <div className="card">
-          <h3 className="card-title">🚀 Pipeline Stages</h3>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', maxHeight: '340px', overflowY: 'auto' }}>
-            {pipeline_stages.length > 0 ? (
-              pipeline_stages.map((stage, idx) => (
-                <div key={idx} style={{
-                  padding: '12px',
-                  backgroundColor: 'var(--bg2)',
-                  borderRadius: '6px',
-                  borderLeft: '3px solid #4f8cff'
-                }}>
-                  <div style={{ fontWeight: 600, color: 'var(--tx1)', marginBottom: '4px' }}>
-                    {stage.name || `Stage ${idx + 1}`}
-                  </div>
-                  <div style={{ fontSize: '13px', color: 'var(--tx2)', marginBottom: '6px' }}>
-                    {stage.description || ''}
-                  </div>
-                  <div style={{ fontSize: '14px', fontWeight: 500, color: '#4f8cff' }}>
-                    {(stage.count || 0).toLocaleString()} products
-                  </div>
-                </div>
-              ))
-            ) : (
-              <div style={{ color: 'var(--tx2)', padding: '20px', textAlign: 'center' }}>No pipeline stages available</div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* THIRD ROW: CATEGORY PERFORMANCE + DATA COVERAGE */}
-      <div className="g2">
-        <div className="card">
-          <h3 className="card-title">📊 Category Performance (Top 10)</h3>
-          <div className="chart-container">
-            <ResponsiveContainer width="100%" height={350}>
-              <BarChart
-                data={topCategories}
-                layout="vertical"
-                margin={{ top: 5, right: 30, left: 150, bottom: 5 }}
-              >
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                <XAxis type="number" stroke="var(--tx2)" />
-                <YAxis dataKey="category" type="category" width={140} stroke="var(--tx2)" />
-                <Tooltip contentStyle={{ backgroundColor: 'var(--bg3)', border: '1px solid var(--border)' }} formatter={(value) => value.toFixed(2)} />
-                <Bar dataKey="avg_score" fill="#4f8cff" />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        <div className="card">
-          <h3 className="card-title">📡 Data Coverage Summary</h3>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
-              <span style={{ color: 'var(--tx2)', fontWeight: 500 }}>🚢 Volza Shipments</span>
-              <span style={{ color: 'var(--tx1)', fontWeight: 600 }}>{(counts.volza_shipments || 0).toLocaleString()}</span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
-              <span style={{ color: 'var(--tx2)', fontWeight: 500 }}>🎯 Volza Buyers</span>
-              <span style={{ color: 'var(--tx1)', fontWeight: 600 }}>{(counts.volza_buyers || 0).toLocaleString()}</span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
-              <span style={{ color: 'var(--tx2)', fontWeight: 500 }}>🏆 Target Buyers</span>
-              <span style={{ color: 'var(--tx1)', fontWeight: 600 }}>{(counts.target_buyers || 0).toLocaleString()}</span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
-              <span style={{ color: 'var(--tx2)', fontWeight: 500 }}>💰 Margin Analysis</span>
-              <span style={{ color: 'var(--tx1)', fontWeight: 600 }}>{(counts.margin_analysis || 0).toLocaleString()}</span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0' }}>
-              <span style={{ color: 'var(--tx2)', fontWeight: 500 }}>🏭 Importers Classified</span>
-              <span style={{ color: 'var(--tx1)', fontWeight: 600 }}>{(counts.importers_classified || 0).toLocaleString()}</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* BOTTOM ROW: CATEGORY VERDICT DISTRIBUTION */}
-      <div className="card">
-        <h3 className="card-title">📈 Category Verdict Distribution</h3>
-        <div className="chart-container" style={{ minHeight: '400px' }}>
-          <ResponsiveContainer width="100%" height={400}>
-            <BarChart
-              data={categoryVerdictData}
-              margin={{ top: 20, right: 30, left: 100, bottom: 60 }}
-            >
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-              <XAxis
-                dataKey="category"
-                angle={-45}
-                textAnchor="end"
-                height={100}
-                stroke="var(--tx2)"
-              />
-              <YAxis label={{ value: 'Count', angle: -90, position: 'insideLeft' }} stroke="var(--tx2)" />
-              <Tooltip contentStyle={{ backgroundColor: 'var(--bg3)', border: '1px solid var(--border)' }} />
-              <Legend />
-              <Bar dataKey="PASS" stackId="a" fill="#34d399" />
-              <Bar dataKey="MAYBE" stackId="a" fill="#fbbf24" />
-              <Bar dataKey="WATCH" stackId="a" fill="#a78bfa" />
-              <Bar dataKey="DROP" stackId="a" fill="#f87171" />
+        <div style={card}>
+          <h3 style={{color:'#e2e8f0', fontSize:14, marginBottom:12}}>HS8 Margin Verdicts</h3>
+          <ResponsiveContainer width="100%" height={220}>
+            <BarChart data={marginData}><XAxis dataKey="name" tick={{fill:'#94a3b8',fontSize:11}} /><YAxis tick={{fill:'#94a3b8',fontSize:11}} /><Tooltip contentStyle={{background:'#1e293b',border:'none',color:'#e2e8f0'}} />
+              <Bar dataKey="count">{marginData.map((d,i)=><Cell key={i} fill={COLORS[d.name]||'#60a5fa'} />)}</Bar>
             </BarChart>
           </ResponsiveContainer>
         </div>
+        <div style={card}>
+          <h3 style={{color:'#e2e8f0', fontSize:14, marginBottom:12}}>Trading Models</h3>
+          <ResponsiveContainer width="100%" height={220}>
+            <PieChart><Pie data={modelData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label={({name,value})=>`${name}: ${value}`}>
+              {modelData.map((d,i)=><Cell key={i} fill={COLORS[d.name]||'#60a5fa'} />)}
+            </Pie><Tooltip contentStyle={{background:'#1e293b',border:'none',color:'#e2e8f0'}} /></PieChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+      <div style={card}>
+        <h3 style={{color:'#e2e8f0', fontSize:14, marginBottom:12}}>Recent Strategy Updates</h3>
+        <table style={{width:'100%', borderCollapse:'collapse'}}>
+          <thead><tr>{['Time','Phase','Action','Details'].map(h=><th key={h} style={{textAlign:'left',padding:'8px 12px',color:'#94a3b8',fontSize:11,borderBottom:'1px solid rgba(148,163,184,0.1)',textTransform:'uppercase'}}>{h}</th>)}</tr></thead>
+          <tbody>{(data.strategy).map((s,i)=>(
+            <tr key={i} style={{borderBottom:'1px solid rgba(148,163,184,0.05)'}}>
+              <td style={{padding:'8px 12px',color:'#64748b',fontSize:12}}>{s.timestamp?new Date(s.timestamp).toLocaleString():'-'}</td>
+              <td style={{padding:'8px 12px'}}><span style={{background:'rgba(96,165,250,0.15)',color:'#60a5fa',padding:'2px 8px',borderRadius:4,fontSize:11}}>{s.phase}</span></td>
+              <td style={{padding:'8px 12px',color:'#e2e8f0',fontSize:13,fontWeight:500}}>{s.action}</td>
+              <td style={{padding:'8px 12px',color:'#94a3b8',fontSize:12,maxWidth:400,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{s.details}</td>
+            </tr>
+          ))}</tbody>
+        </table>
       </div>
     </div>
   );
-};
-
-export default Overview;
+}

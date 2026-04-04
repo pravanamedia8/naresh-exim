@@ -1,124 +1,77 @@
 import { useState } from 'react';
 import Overview from './tabs/Overview';
-import PipelineJourney from './tabs/PipelineJourney';
-import HS2Chapters from './tabs/HS2Chapters';
-import HS4Products from './tabs/HS4Products';
-import HS6SubHeads from './tabs/HS6SubHeads';
-import HS8Raw from './tabs/HS8Raw';
-import Categories from './tabs/Categories';
-import Margins from './tabs/Margins';
-import Shipments from './tabs/Shipments';
-import BuyersTargets from './tabs/BuyersTargets';
-import Importers from './tabs/Importers';
-import ScoringRef from './tabs/ScoringRef';
-import BusinessIntel from './tabs/BusinessIntel';
-import ElectronicsResearch from './tabs/ElectronicsResearch';
-import ProductShortlist from './tabs/ProductShortlist';
-import HS8DeepDive from './tabs/HS8DeepDive';
-import DealPipeline from './tabs/DealPipeline';
-import FinancialProjections from './tabs/FinancialProjections';
-import ComplianceTracker from './tabs/ComplianceTracker';
-import SupplierNegotiations from './tabs/SupplierNegotiations';
-import SupplyChainPlan from './tabs/SupplyChainPlan';
+import ProjectTracker from './tabs/ProjectTracker';
+import ResearchPipeline from './tabs/ResearchPipeline';
+import ScoringDashboard from './tabs/ScoringDashboard';
+import MarginIntelligence from './tabs/MarginIntelligence';
+import WinnersDashboard from './tabs/WinnersDashboard';
+import BuyerIntelligence from './tabs/BuyerIntelligence';
+import ShipmentAnalytics from './tabs/ShipmentAnalytics';
+import HSExplorer from './tabs/HSExplorer';
+import RegulatoryDashboard from './tabs/RegulatoryDashboard';
+import SupplyChainView from './tabs/SupplyChainView';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('overview');
 
   const tabGroups = [
     {
-      label: 'Executive',
+      label: 'Command Center',
       tabs: [
-        { id: 'overview', label: '📊 Overview', subtitle: 'Executive dashboard' },
-        { id: 'deals', label: '🤝 Deal Pipeline', subtitle: 'Active deals & stages' },
-        { id: 'finance', label: '💹 Financials', subtitle: '3-scenario projections' },
-        { id: 'compliance', label: '📋 Compliance', subtitle: 'Cert tracking' },
-        { id: 'negotiations', label: '🏭 Suppliers', subtitle: 'Negotiation tracker' },
-        { id: 'supplychain', label: '🔗 Supply Chain', subtitle: 'Go-to-market plan' },
-      ],
-    },
-    {
-      label: 'Operations',
-      tabs: [
-        { id: 'pipeline', label: '🚀 Pipeline', subtitle: 'Sales funnel journey' },
-        { id: 'shipments', label: '🚢 Shipments', subtitle: '7,784 records' },
-        { id: 'buyers', label: '🎯 Buyers & Targets', subtitle: '950 buyers + 12 targets' },
-        { id: 'importers', label: '🏭 Importers', subtitle: '54 classified' },
+        { id: 'overview', label: '🎯 Overview' },
+        { id: 'tracker', label: '📋 Tracker' },
       ],
     },
     {
       label: 'Research',
       tabs: [
-        { id: 'electronics', label: '🔬 Electronics', subtitle: '180 codes pipeline' },
-        { id: 'shortlist', label: '🏆 Shortlist', subtitle: '35 scored products' },
-        { id: 'hs8deep', label: '🔎 HS8 Deep Dive', subtitle: '249 products, 3.6K buyers' },
+        { id: 'pipeline', label: '🔬 Pipeline' },
+        { id: 'scoring', label: '🏆 Scoring' },
       ],
     },
     {
-      label: 'Product Hierarchy',
+      label: 'Margins',
       tabs: [
-        { id: 'hs2', label: '📦 HS2', subtitle: '97 chapters' },
-        { id: 'hs4', label: '🏷️ HS4', subtitle: '1,123 products' },
-        { id: 'hs6', label: '🔍 HS6', subtitle: '4,632 sub-headings' },
-        { id: 'hs8', label: '📋 HS8', subtitle: '9,300 line items' },
+        { id: 'margins', label: '💰 HS8 Margins' },
+        { id: 'winners', label: '🌟 Winners' },
       ],
     },
     {
-      label: 'Analysis',
+      label: 'Market Intel',
       tabs: [
-        { id: 'categories', label: '📁 Categories', subtitle: '17 categories' },
-        { id: 'margins', label: '💰 Margins', subtitle: '4 products' },
-        { id: 'business', label: '🧠 Business Intel', subtitle: 'Projections & forecasts' },
-        { id: 'scoring', label: '⚡ Scoring', subtitle: 'Methodology reference' },
+        { id: 'buyers', label: '🎯 Buyers' },
+        { id: 'shipments', label: '🚢 Shipments' },
+      ],
+    },
+    {
+      label: 'Hierarchy',
+      tabs: [
+        { id: 'hierarchy', label: '📊 HS Explorer' },
+      ],
+    },
+    {
+      label: 'Deep Dive',
+      tabs: [
+        { id: 'regulatory', label: '📋 Regulatory' },
+        { id: 'supply', label: '🏭 Supply Chain' },
       ],
     },
   ];
 
   const renderTab = () => {
     switch (activeTab) {
-      case 'overview':
-        return <Overview />;
-      case 'deals':
-        return <DealPipeline />;
-      case 'finance':
-        return <FinancialProjections />;
-      case 'compliance':
-        return <ComplianceTracker />;
-      case 'negotiations':
-        return <SupplierNegotiations />;
-      case 'supplychain':
-        return <SupplyChainPlan />;
-      case 'pipeline':
-        return <PipelineJourney />;
-      case 'hs2':
-        return <HS2Chapters />;
-      case 'hs4':
-        return <HS4Products />;
-      case 'hs6':
-        return <HS6SubHeads />;
-      case 'hs8':
-        return <HS8Raw />;
-      case 'categories':
-        return <Categories />;
-      case 'margins':
-        return <Margins />;
-      case 'business':
-        return <BusinessIntel />;
-      case 'shipments':
-        return <Shipments />;
-      case 'buyers':
-        return <BuyersTargets />;
-      case 'importers':
-        return <Importers />;
-      case 'electronics':
-        return <ElectronicsResearch />;
-      case 'shortlist':
-        return <ProductShortlist />;
-      case 'hs8deep':
-        return <HS8DeepDive />;
-      case 'scoring':
-        return <ScoringRef />;
-      default:
-        return <Overview />;
+      case 'overview': return <Overview />;
+      case 'tracker': return <ProjectTracker />;
+      case 'pipeline': return <ResearchPipeline />;
+      case 'scoring': return <ScoringDashboard />;
+      case 'margins': return <MarginIntelligence />;
+      case 'winners': return <WinnersDashboard />;
+      case 'buyers': return <BuyerIntelligence />;
+      case 'shipments': return <ShipmentAnalytics />;
+      case 'hierarchy': return <HSExplorer />;
+      case 'regulatory': return <RegulatoryDashboard />;
+      case 'supply': return <SupplyChainView />;
+      default: return <Overview />;
     }
   };
 
@@ -126,42 +79,29 @@ export default function App() {
     <div className="app">
       <header className="hdr">
         <div>
-          <div className="hdr-title">🏢 KALASH EXIM Command Center</div>
-          <div className="hdr-subtitle">📡 LIVE from Supabase + SQLite | Electronics Research Pipeline + Import Operations</div>
+          <div className="hdr-title">KALASH EXIM Command Center</div>
+          <div className="hdr-subtitle">Real-time Supabase Analytics | Electronics + Chemicals Research</div>
         </div>
         <div className="hdr-right">
           <div className="hdr-subtitle">{new Date().toLocaleDateString()}</div>
-          <div className="db-indicator">🟢 DB Connected</div>
+          <div className="db-indicator">LIVE</div>
         </div>
       </header>
-
       <nav className="tabs">
-        {tabGroups.map((group, groupIdx) => (
+        {tabGroups.map((group, gi) => (
           <div key={group.label} className="tab-group">
-            {group.tabs.map((tab, tabIdx) => (
+            {group.tabs.map((tab, ti) => (
               <div key={tab.id}>
-                <button
-                  className={`tab-btn ${activeTab === tab.id ? 'active' : ''}`}
-                  onClick={() => setActiveTab(tab.id)}
-                  title={tab.subtitle}
-                >
-                  {tab.label}
-                </button>
-                {tabIdx < group.tabs.length - 1 && <div className="tab-separator" />}
+                <button className={`tab-btn ${activeTab === tab.id ? 'active' : ''}`} onClick={() => setActiveTab(tab.id)}>{tab.label}</button>
+                {ti < group.tabs.length - 1 && <div className="tab-separator" />}
               </div>
             ))}
-            {groupIdx < tabGroups.length - 1 && <div className="group-separator" />}
+            {gi < tabGroups.length - 1 && <div className="group-separator" />}
           </div>
         ))}
       </nav>
-
-      <div className="tab-content">
-        {renderTab()}
-      </div>
-
-      <footer className="footer">
-        ⚡ KALASH EXIM Command Center © 2026 | Powered by React + Supabase + Recharts
-      </footer>
+      <div className="tab-content">{renderTab()}</div>
+      <footer className="footer">KALASH EXIM Command Center &copy; 2026 | React + Supabase + Recharts</footer>
     </div>
   );
 }
