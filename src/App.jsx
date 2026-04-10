@@ -10,6 +10,7 @@ import ShipmentAnalytics from './tabs/ShipmentAnalytics';
 import HSExplorer from './tabs/HSExplorer';
 import RegulatoryDashboard from './tabs/RegulatoryDashboard';
 import SupplyChainView from './tabs/SupplyChainView';
+import SellingPriceResearch from './tabs/SellingPriceResearch';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('overview');
@@ -34,6 +35,7 @@ export default function App() {
       tabs: [
         { id: 'margins', label: '💰 HS8 Margins' },
         { id: 'winners', label: '🌟 Winners' },
+        { id: 'selling', label: '🏷️ Selling Prices' },
       ],
     },
     {
@@ -66,6 +68,7 @@ export default function App() {
       case 'scoring': return <ScoringDashboard />;
       case 'margins': return <MarginIntelligence />;
       case 'winners': return <WinnersDashboard />;
+      case 'selling': return <SellingPriceResearch />;
       case 'buyers': return <BuyerIntelligence />;
       case 'shipments': return <ShipmentAnalytics />;
       case 'hierarchy': return <HSExplorer />;
