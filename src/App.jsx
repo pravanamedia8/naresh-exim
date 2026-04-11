@@ -12,6 +12,7 @@ import RegulatoryDashboard from './tabs/RegulatoryDashboard';
 import SupplyChainView from './tabs/SupplyChainView';
 import SellingPriceResearch from './tabs/SellingPriceResearch';
 import HS8MarginDetail from './tabs/HS8MarginDetail';
+import ElectronicsPriority from './tabs/ElectronicsPriority';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('overview');
@@ -38,6 +39,7 @@ export default function App() {
         { id: 'winners', label: '🌟 Winners' },
         { id: 'selling', label: '🏷️ Selling Prices' },
         { id: 'hs8detail', label: '🔬 HS8 Deep Dive' },
+        { id: 'elecpriority', label: '⚡ Electronics Top 30' },
       ],
     },
     {
@@ -72,6 +74,7 @@ export default function App() {
       case 'winners': return <WinnersDashboard />;
       case 'selling': return <SellingPriceResearch />;
       case 'hs8detail': return <HS8MarginDetail />;
+      case 'elecpriority': return <ElectronicsPriority />;
       case 'buyers': return <BuyerIntelligence />;
       case 'shipments': return <ShipmentAnalytics />;
       case 'hierarchy': return <HSExplorer />;
