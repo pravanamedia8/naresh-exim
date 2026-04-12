@@ -31,7 +31,7 @@ export default function SellingPriceResearch() {
 
   // KPI calculations
   const total = data.length;
-  const done = data.filter(r=>r.selling_price_research_status==='done').length;
+  const done = data.filter(r=>r.selling_price_research_status==='done'||r.selling_price_research_status==='completed').length;
   const inProg = data.filter(r=>r.selling_price_research_status==='in_progress').length;
   const pending = total - done - inProg;
   const withMargin = data.filter(r=>r.real_margin_pct!=null);
@@ -71,7 +71,7 @@ export default function SellingPriceResearch() {
     if (!hs4Map[r.hs4]) hs4Map[r.hs4] = {hs4:r.hs4,total:0,done:0,winners:0,cif:0};
     hs4Map[r.hs4].total++;
     hs4Map[r.hs4].cif += r.total_cif_usd||0;
-    if (r.selling_price_research_status==='done') hs4Map[r.hs4].done++;
+    if (r.selling_price_research_status==='done'||r.selling_price_research_status==='completed') hs4Map[r.hs4].done++;
     if (r.margin_verdict==='EXCELLENT'||r.margin_verdict==='GOOD') hs4Map[r.hs4].winners++;
   });
   const hs4Progress = Object.values(hs4Map).sort((a,b)=>b.cif-a.cif);
@@ -83,7 +83,7 @@ export default function SellingPriceResearch() {
 
   // Filtered table data
   let filtered = data;
-  if (filter==='done') filtered = filtered.filter(r=>r.selling_price_research_status==='done');
+  if (filter==='done') filtered = filtered.filter(r=>r.selling_price_research_status==='done'||r.selling_price_research_status==='completed');
   else if (filter==='pending') filtered = filtered.filter(r=>r.selling_price_research_status==='pending');
   else if (filter==='winners') filtered = filtered.filter(r=>r.margin_verdict==='EXCELLENT'||r.margin_verdict==='GOOD');
   else if (filter==='negative') filtered = filtered.filter(r=>r.margin_verdict==='NEGATIVE');
@@ -98,7 +98,7 @@ export default function SellingPriceResearch() {
   const td = {padding:'6px',fontSize:12,borderBottom:'1px solid rgba(148,163,184,0.05)',color:'#e2e8f0'};
   const badge = (text,color) => <span style={{background:`rgba(${color},0.15)`,color:`rgb(${color})`,padding:'2px 8px',borderRadius:6,fontSize:10,fontWeight:600}}>{text}</span>;
   const mvBadge = v => v ? badge(v, v==='EXCELLENT'?'52,211,153':v==='GOOD'?'96,165,250':v==='MODERATE'?'251,191,36':v==='THIN'?'245,158,11':'248,113,113') : <span style={{color:'#475569',fontSize:10}}>—</span>;
-  const statusBadge = s => badge(s||'pending', s==='done'?'52,211,153':s==='in_progress'?'251,191,36':'148,163,184');
+  const statusBadge = s => badge(s||'pending', (s==='done'||s==='completed')?'52,211,153':s==='in_progress'?'251,191,36':'148,163,184');
   const fmt = (n,d=0) => n!=null ? n.toLocaleString(undefined,{maximumFractionDigits:d}) : '—';
   const fmtUSD = n => n!=null ? '$'+n.toLocaleString(undefined,{maximumFractionDigits:0}) : '—';
 

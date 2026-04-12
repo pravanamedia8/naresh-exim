@@ -330,7 +330,7 @@ function RadarView({ items }) {
 
 function VolzaQueueView({ queue }) {
   const queued = queue.filter(q => q.scrape_status === 'queued').length;
-  const done = queue.filter(q => q.scrape_status === 'done').length;
+  const done = queue.filter(q => q.scrape_status === 'done' || q.scrape_status === 'completed').length;
   return (
     <div>
       <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
@@ -365,7 +365,7 @@ function VolzaQueueView({ queue }) {
                 <td style={{ padding: '8px', color: '#e2e8f0' }}>${fmt(q.val_m, 1)}</td>
                 <td style={{ padding: '8px' }}><span style={{ padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: modelColor(q.trading_model) + '20', color: modelColor(q.trading_model) }}>{q.trading_model}</span></td>
                 <td style={{ padding: '8px' }}>
-                  <span style={{ padding: '2px 8px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: q.scrape_status === 'done' ? 'rgba(52,211,153,0.15)' : 'rgba(251,191,36,0.15)', color: q.scrape_status === 'done' ? '#34d399' : '#fbbf24' }}>{q.scrape_status?.toUpperCase()}</span>
+                  <span style={{ padding: '2px 8px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: (q.scrape_status === 'done' || q.scrape_status === 'completed') ? 'rgba(52,211,153,0.15)' : 'rgba(251,191,36,0.15)', color: (q.scrape_status === 'done' || q.scrape_status === 'completed') ? '#34d399' : '#fbbf24' }}>{q.scrape_status?.toUpperCase()}</span>
                 </td>
                 <td style={{ padding: '8px', color: '#94a3b8' }}>{q.shipment_count || '—'}</td>
                 <td style={{ padding: '8px', color: '#94a3b8' }}>{q.buyer_count || '—'}</td>
